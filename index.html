@@ -1,81 +1,83 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Financeiro</title>
+<!DOCTYPE html> 
+<html lang="pt-BR"> 
+<head> 
+    <meta charset="UTF-8"> 
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>Dashboard Financeiro</title> 
     
-    <link rel="icon" type="image/png" sizes="32x32" href="icon.png">
-    <link rel="apple-touch-icon" href="icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icon.png"> 
+    <link rel="apple-touch-icon" href="icon.png"> 
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com"> 
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin> 
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"> 
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"> 
     
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css"> 
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
-</head>
-<body class="is-loading">
-    <div id="auth-container">
-        <div class="auth-box">
-            <i class="fa-solid fa-shield-halved"></i>
-            <h1>Acesso Seguro</h1>
-            <p>Insira a senha para acessar o dashboard.</p>
-            <input type="password" id="password-input" placeholder="••••••••">
-            <p class="error-message" id="error-message"></p>
-            <button id="login-button">Entrar</button>
-        </div>
-    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script> 
+</head> 
+<body class="is-loading"> 
+    <div id="auth-container"> 
+        <div class="auth-box"> 
+            <i class="fa-solid fa-shield-halved"></i> 
+            <h1>Acesso Seguro</h1> 
+            <p>Insira a senha para acessar o dashboard.</p> 
+            <form id="login-form">
+                <input type="password" id="password-input" placeholder="••••••••"> 
+                <p class="error-message" id="error-message"></p> 
+                <button id="login-button" type="submit">Entrar</button> 
+            </form>
+        </div> 
+    </div> 
  
-    <div id="app-root">
-        <nav class="sidebar">
-            <h1 class="sidebar-header"><i class="fa-solid fa-wallet"></i> Financeiro</h1>
-            <div class="sidebar-nav">
-                <a class="nav-link active" data-view="resumos"><i class="fa-solid fa-chart-pie"></i> Resumos</a>
-                <a class="nav-link" data-view="lancar"><i class="fa-solid fa-plus"></i> Lançar</a>
-                <a class="nav-link" data-view="invoices"><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</a>
-                <a class="nav-link" data-view="movements"><i class="fa-solid fa-receipt"></i> Movimentações</a>
-                <a class="nav-link" data-view="accounts"><i class="fa-solid fa-building-columns"></i> Contas</a>
-                <a class="nav-link" data-view="planning"><i class="fa-solid fa-lightbulb"></i> Planejamento</a>
-                <a class="nav-link" data-view="settings"><i class="fa-solid fa-gears"></i> Configurações</a>
-            </div>
-        </nav>
+    <div id="app-root"> 
+        <nav class="sidebar"> 
+            <h1 class="sidebar-header"><i class="fa-solid fa-wallet"></i> Financeiro</h1> 
+            <div class="sidebar-nav"> 
+                <a class="nav-link active" data-view="resumos"><i class="fa-solid fa-chart-pie"></i> Resumos</a> 
+                <a class="nav-link" data-view="lancar"><i class="fa-solid fa-plus"></i> Lançar</a> 
+                <a class="nav-link" data-view="invoices"><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</a> 
+                <a class="nav-link" data-view="movements"><i class="fa-solid fa-receipt"></i> Movimentações</a> 
+                <a class="nav-link" data-view="accounts"><i class="fa-solid fa-building-columns"></i> Contas</a> 
+                <a class="nav-link" data-view="planning"><i class="fa-solid fa-lightbulb"></i> Planejamento</a> 
+                <a class="nav-link" data-view="settings"><i class="fa-solid fa-gears"></i> Configurações</a> 
+            </div> 
+        </nav> 
  
-        <main class="main-content">
-            <header class="main-header">
-                <div id="month-selector-container" class="month-selector" style="visibility: visible;">
-                    <button class="month-nav-arrow" id="prev-month-btn" title="Mês anterior"><i class="fa-solid fa-chevron-left"></i></button>
-                    <select id="month-year-selector"></select>
-                    <button class="month-nav-arrow" id="next-month-btn" title="Próximo mês"><i class="fa-solid fa-chevron-right"></i></button>
-                </div>
-                <div class="header-actions">
-                    <button id="logout-button" title="Sair"><i class="fa-solid fa-arrow-right-from-bracket"></i></button>
-                </div>
-            </header>
-            <div id="view-container"></div>
-        </main>
+        <main class="main-content"> 
+            <header class="main-header"> 
+                <div id="month-selector-container" class="month-selector" style="visibility: visible;"> 
+                    <button class="month-nav-arrow" id="prev-month-btn" title="Mês anterior"><i class="fa-solid fa-chevron-left"></i></button> 
+                    <select id="month-year-selector"></select> 
+                    <button class="month-nav-arrow" id="next-month-btn" title="Próximo mês"><i class="fa-solid fa-chevron-right"></i></button> 
+                </div> 
+                <div class="header-actions"> 
+                    <button id="logout-button" title="Sair"><i class="fa-solid fa-arrow-right-from-bracket"></i></button> 
+                </div> 
+            </header> 
+            <div id="view-container"></div> 
+        </main> 
         
-        <nav class="mobile-nav">
-            <a class="nav-link active" data-view="resumos"><i class="fa-solid fa-chart-pie"></i><span>Resumos</span></a>
-            <a class="nav-link" data-view="lancar"><i class="fa-solid fa-plus"></i><span>Lançar</span></a>
-            <a class="nav-link" data-view="invoices"><i class="fa-solid fa-file-invoice-dollar"></i><span>Faturas</span></a>
-            <a class="nav-link" data-view="movements"><i class="fa-solid fa-receipt"></i><span>Movim.</span></a>
-            <a class="nav-link" data-view="accounts"><i class="fa-solid fa-building-columns"></i><span>Contas</span></a>
-            <a class="nav-link" data-view="planning"><i class="fa-solid fa-lightbulb"></i><span>Planejar</span></a>
-            <a class="nav-link" data-view="settings"><i class="fa-solid fa-gears"></i><span>Ajustes</span></a>
-        </nav>
+        <nav class="mobile-nav"> 
+            <a class="nav-link active" data-view="resumos"><i class="fa-solid fa-chart-pie"></i><span>Resumos</span></a> 
+            <a class="nav-link" data-view="lancar"><i class="fa-solid fa-plus"></i><span>Lançar</span></a> 
+            <a class="nav-link" data-view="invoices"><i class="fa-solid fa-file-invoice-dollar"></i><span>Faturas</span></a> 
+            <a class="nav-link" data-view="movements"><i class="fa-solid fa-receipt"></i><span>Movim.</span></a> 
+            <a class="nav-link" data-view="accounts"><i class="fa-solid fa-building-columns"></i><span>Contas</span></a> 
+            <a class="nav-link" data-view="planning"><i class="fa-solid fa-lightbulb"></i><span>Planejar</span></a> 
+            <a class="nav-link" data-view="settings"><i class="fa-solid fa-gears"></i><span>Ajustes</span></a> 
+        </nav> 
  
-    </div>
+    </div> 
  
-    <div id="modal-container" class="modal-overlay"></div>
-    <div id="toast-container"></div>
+    <div id="modal-container" class="modal-overlay"></div> 
+    <div id="toast-container"></div> 
  
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script> 
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script> 
  
-    <script src="script.js"></script>
+    <script src="script.js"></script> 
  
-</body>
+</body> 
 </html>
