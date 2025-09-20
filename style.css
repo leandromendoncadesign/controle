@@ -1036,8 +1036,6 @@ body.is-loading {
     .planning-input-value { grid-area: value; padding-left: 0 !important; }
     .planning-item-actions { grid-area: actions; }
     
-    .sync-btn { 
-        display: none; 
     }
 
     /* --- 4. OTIMIZAÇÃO DE MODAIS --- */
@@ -1060,12 +1058,28 @@ body.is-loading {
         width: 100%;
         margin: 0;
     }
-}
 
 /* Esconde a navegação mobile em telas maiores */
 @media (min-width: 769px) {
     .mobile-nav {
         display: none;
     }
+    /* --- AJUSTE PARA EXIBIR O BOTÃO SYNC NO MOBILE --- */
+.planning-item.expense-item {
+    /* Adicionamos uma coluna extra para o botão de sync */
+    grid-template-columns: auto 1fr auto auto; 
+    grid-template-areas:
+        "check description sync actions"
+        ".     value       value value ";
+}
+
+.planning-item .sync-btn {
+    grid-area: sync; /* Posiciona o botão na nova área 'sync' */
+    place-self: center; /* Centraliza o botão em seu espaço */
+    width: 32px; /* Tamanho um pouco menor para caber bem */
+    height: 32px;
+    font-size: 13px;
+}
+
 }
 
