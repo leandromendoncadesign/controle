@@ -203,8 +203,8 @@ body.is-loading {
     align-items: center;
     justify-content: center;
     transition: background-color 0.2s ease;
-    padding: 0; /* Garante que não haja preenchimento interno */
-    flex-shrink: 0; /* Impede que o botão seja esmagado */
+    padding: 0;
+    flex-shrink: 0;
 }
 .month-nav-arrow:hover,
 #logout-button:hover {
@@ -305,7 +305,6 @@ body.is-loading {
     margin-bottom: 8px;
     font-size: 14px;
 }
-/* Estilos base para inputs e selects */
 .form-group input[type="text"],
 .form-group input[type="number"],
 .form-group input[type="date"],
@@ -326,7 +325,6 @@ body.is-loading {
     -moz-appearance: none;
     appearance: none;
 }
-/* Foco para todos os campos */
 .form-group input:focus,
 .form-group select:focus,
 #month-year-selector:focus,
@@ -336,7 +334,7 @@ body.is-loading {
     border-color: var(--accent-blue);
     box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
 }
-/* Seta customizada APENAS para selects */
+
 .form-group select,
 #month-year-selector,
 #invoice-card-selector,
@@ -345,7 +343,9 @@ body.is-loading {
     background-repeat: no-repeat;
     background-position: right 0.75rem center;
     background-size: 16px 12px;
+    padding-right: 40px;
 }
+
 .input-group-currency {
     position: relative;
 }
@@ -740,7 +740,7 @@ body.is-loading {
 }
 
 /* ====================================================================== */
-/* ESTILOS PARA A TELA DE CONFIGURAÇÕES (NOVO)                            */
+/* ESTILOS PARA A TELA DE CONFIGURAÇÕES                                   */
 /* ====================================================================== */
 .settings-section {
     padding: 16px 0;
@@ -805,7 +805,6 @@ body.is-loading {
 .modal-content {
     background: var(--bg-secondary);
     border-radius: var(--radius-l);
-    padding: 24px;
     width: 90%;
     max-width: 500px;
 }
@@ -813,13 +812,44 @@ body.is-loading {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--separator-color);
+}
+.modal-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+}
+.modal-body {
+    padding: 24px;
 }
 .modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: 10px;
-    margin-top: 24px;
+    padding: 20px 24px;
+    border-top: 1px solid var(--separator-color);
+    background-color: var(--bg-tertiary);
+    border-bottom-left-radius: var(--radius-l);
+    border-bottom-right-radius: var(--radius-l);
+    flex-wrap: wrap; /* Garante que botões não se sobreponham */
+}
+.close-modal-btn {
+    background: transparent;
+    border: none;
+    font-size: 16px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+.close-modal-btn:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text-primary);
 }
 .button-primary {
     background-color: var(--accent-blue);
@@ -936,4 +966,73 @@ body.is-loading {
     .mobile-nav {
         display: none;
     }
+}
+/* --- Melhorias no Seletor de Cores --- */
+.form-group.color-picker {
+    display: flex;
+    flex-direction: column;
+}
+
+.color-picker-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.color-preview {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 2px solid #ddd;
+    flex-shrink: 0;
+}
+/* --- Melhorias no Seletor de Cores --- */
+.form-group.color-picker {
+    display: flex;
+    flex-direction: column;
+}
+
+.color-picker-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.color-preview {
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    border: 2px solid #ddd;
+    flex-shrink: 0;
+}
+
+input[type="color"] {
+    width: 100%;
+    height: 40px;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+
+/* --- Melhorias nos Botões do Modal --- */
+.modal-actions {
+    gap: 12px;
+}
+/* --- Correção de tamanho para os botões do modal --- */
+.modal-actions .button-secondary,
+.modal-actions .button-primary {
+    padding: 10px 20px; /* Adiciona mais espaço interno */
+    font-size: 15px;   /* Garante que a fonte não seja muito pequena */
+    min-width: 100px;  /* Define uma largura mínima */
+    text-align: center;
+    justify-content: center;
+}
+/* --- Correção da Barra de Rolagem no Modal de Detalhes --- */
+.modal-body {
+    max-height: 60vh; /* Define uma altura máxima (ex: 60% da altura da tela) */
+    overflow-y: auto; /* Adiciona a barra de rolagem vertical SÓ se necessário */
+    padding-right: 10px; /* Cria um pequeno espaço para a barra não ficar colada no texto */
 }
