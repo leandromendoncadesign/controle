@@ -1,3 +1,4 @@
+// CÓDIGO COMPLETO E FINAL - Com todas as correções e melhorias
 document.addEventListener('DOMContentLoaded', () => {
     const App = {
         state: {
@@ -30,6 +31,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // INICIALIZAÇÃO E NAVEGAÇÃO
         // ======================================================================
         init() {
+            console.log('App iniciando...');
             this.elements = {
                 body: document.body,
                 appRoot: document.getElementById('app-root'),
@@ -52,34 +54,26 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         attachEventListeners() {
+            console.log('Anexando escutadores de eventos...');
             this.elements.logoutButton.onclick = () => this.handleLogout();
             this.elements.navLinks.forEach(link => link.onclick = (e) => this.navigate(e));
             this.elements.monthYearSelector.onchange = (e) => this.changeMonth(e.target.value);
             this.elements.prevMonthBtn.onclick = () => this.navigateMonth(-1);
             this.elements.nextMonthBtn.onclick = () => this.navigateMonth(1);
-            this.elements.viewContainer.addEventListener('click', this.handleViewContainerClick.bind(this));
+
+            this.elements.body.addEventListener('click', this.handleViewContainerClick.bind(this));
+            this.elements.body.addEventListener('submit', this.handleFormSubmit.bind(this));
+            
             this.elements.viewContainer.addEventListener('input', this.handleStateUpdateOnInput.bind(this));
             this.elements.viewContainer.addEventListener('change', this.handleSaveOnChange.bind(this));
-            this.elements.viewContainer.addEventListener('submit', this.handleViewContainerSubmit.bind(this));
         },
 
         checkLogin() {
+            const loginForm = document.getElementById('login-form');
+            if (!loginForm) return;
             const passwordInput = document.getElementById('password-input');
-            const loginButton = document.getElementById('login-button');
             const errorMessage = document.getElementById('error-message');
-            const startApp = () => {
-                this.elements.authContainer.style.display = 'none';
-                this.elements.appRoot.style.visibility = 'visible';
-                this.elements.body.classList.remove('is-loading');
-                this.attachEventListeners();
-                this.setCurrentMonthYear();
-            };
-            const showLogin = () => {
-                this.elements.authContainer.style.display = 'flex';
-                this.elements.appRoot.style.visibility = 'hidden';
-                this.elements.body.classList.remove('is-loading');
-                passwordInput.focus();
-            };
+            
             const attemptLogin = () => {
                 if (passwordInput.value === '1206') {
                     localStorage.setItem('isLoggedInFinanceiro', 'true');
@@ -88,10 +82,27 @@ document.addEventListener('DOMContentLoaded', () => {
                     errorMessage.textContent = 'Senha incorreta.';
                 }
             };
-            loginButton.onclick = attemptLogin;
-            passwordInput.onkeyup = (e) => {
-                if (e.key === 'Enter') attemptLogin();
+
+            const startApp = () => {
+                this.elements.authContainer.style.display = 'none';
+                this.elements.appRoot.style.visibility = 'visible';
+                this.elements.body.classList.remove('is-loading');
+                this.attachEventListeners();
+                this.setCurrentMonthYear();
             };
+            
+            const showLogin = () => {
+                this.elements.authContainer.style.display = 'flex';
+                this.elements.appRoot.style.visibility = 'hidden';
+                this.elements.body.classList.remove('is-loading');
+                passwordInput.focus();
+            };
+            
+            loginForm.onsubmit = (e) => {
+                e.preventDefault();
+                attemptLogin();
+            };
+            
             if (localStorage.getItem('isLoggedInFinanceiro') === 'true') {
                 startApp();
             } else {
@@ -171,7 +182,7 @@ document.addEventListener('DOMContentLoaded', () => {
         populateMonthSelector() {
             const monthsSet = new Set();
             this.state.allTransactions.forEach(t => {
-                if (t.date) {
+                if (t && t.date) {
                     const jsDate = this.getDateObject(t.date);
                     monthsSet.add(`${(jsDate.getMonth() + 1).toString().padStart(2, '0')}-${jsDate.getFullYear()}`);
                 }
@@ -202,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.state.listeners.forEach(unsubscribe => unsubscribe());
             this.state.listeners = [];
         },
-
+        
         render() {
             this.elements.navLinks.forEach(link => {
                 const isActive = link.dataset.view === this.state.currentView;
@@ -270,10 +281,12 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         getResumosHtml() {
-            const transactionsThisMonth = this.state.allTransactions.filter(t => t.monthYear === this.state.currentMonthYear);
+            const transactionsThisMonth = this.state.allTransactions.filter(t => t && t.monthYear === this.state.currentMonthYear);
             const totalIncome = transactionsThisMonth.filter(t => t.type === 'Entrada').reduce((sum, t) => sum + t.value, 0);
             const totalExpense = transactionsThisMonth.filter(t => t.type === 'Saída').reduce((sum, t) => sum + t.value, 0);
-            const accountBalance = this.state.accounts.filter(a => a.type === 'Conta Corrente' && !a.archived).reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
+            const accountBalance = this.state.accounts
+                .filter(a => a && a.type === 'Conta Corrente' && !a.arquivado)
+                .reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
             return `
                 <div class="view-header"><h2><i class="fa-solid fa-chart-pie"></i> Resumos</h2></div>
                 <div class="grid-container" style="margin-bottom: 24px;">
@@ -306,7 +319,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         getInvoicesHtml() {
-            const creditCards = this.state.accounts.filter(a => a.type === 'Cartão de Crédito' && !a.archived);
+            const creditCards = this.state.accounts.filter(a => a && a.type === 'Cartão de Crédito' && !a.arquivado);
             if (creditCards.length === 0) {
                 return `<div class="view-header"><h2><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</h2></div>
                         <div class="card"><div class="empty-state"><i class="fa-solid fa-credit-card"></i><p>Nenhum cartão de crédito ativo cadastrado.</p></div></div>`;
@@ -315,11 +328,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalLimit = creditCards.reduce((sum, card) => sum + (card.limit || 0), 0);
             const summaryHtml = `
             <div class="card" style="margin-top: 24px;">
-                 <h3 class="card-title"><i class="fa-solid fa-layer-group"></i> Resumo Geral de Cartões</h3>
-                 <div class="card-details" style="background: transparent; padding: 0;">
-                      <div class="detail-row"><span class="label"><i class="fa-solid fa-file-invoice-dollar negative"></i> <strong>Valor de Faturas Abertas</strong></span><span class="value negative">${this.formatCurrency(totalOpenInvoices)}</span></div>
-                      <div class="detail-row"><span class="label"><i class="fa-solid fa-coins neutral-positive"></i> <strong>Limite de Crédito Total</strong></span><span class="value neutral-positive">${this.formatCurrency(totalLimit)}</span></div>
-                 </div>
+                <h3 class="card-title"><i class="fa-solid fa-layer-group"></i> Resumo Geral de Cartões</h3>
+                <div class="card-details" style="background: transparent; padding: 0;">
+                        <div class="detail-row"><span class="label"><i class="fa-solid fa-file-invoice-dollar negative"></i> <strong>Valor de Faturas Abertas</strong></span><span class="value negative">${this.formatCurrency(totalOpenInvoices)}</span></div>
+                        <div class="detail-row"><span class="label"><i class="fa-solid fa-coins neutral-positive"></i> <strong>Limite de Crédito Total</strong></span><span class="value neutral-positive">${this.formatCurrency(totalLimit)}</span></div>
+                </div>
             </div>`;
             return `<div class="view-header"><h2><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</h2></div>
                     <div class="card">
@@ -333,7 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         getMovementsHtml() {
-            let transactions = this.state.allTransactions.filter(t => t.monthYear === this.state.currentMonthYear);
+            let transactions = this.state.allTransactions.filter(t => t && t.monthYear === this.state.currentMonthYear);
             if (this.state.movementsFilter.type !== 'all') {
                 transactions = transactions.filter(t => t.type === this.state.movementsFilter.type);
             }
@@ -341,6 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 transactions = transactions.filter(t => t.accountId === this.state.movementsFilter.accountId);
             }
             transactions.sort((a, b) => {
+                if (!a || !b) return 0;
                 const { key, order } = this.state.movementsSort;
                 const valA = key === 'date' ? this.getDateObject(a[key]) : a[key];
                 const valB = key === 'date' ? this.getDateObject(b[key]) : b[key];
@@ -362,7 +376,9 @@ document.addEventListener('DOMContentLoaded', () => {
         getSettingsHtml() {
             const getItemsHtml = (items, type, icon) => {
                 if (!items || items.length === 0) return `<div class="empty-state" style="padding: 20px 0;">Nenhum item cadastrado.</div>`;
-                return items.map(item => `
+                return items
+                    .filter(item => !!item)
+                    .map(item => `
                     <div class="item-list-row">
                         <span class="icon-name"><i class="fa-solid ${item.icon || icon}"></i> ${item.name}</span>
                         <div class="actions">
@@ -381,7 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         getAccountsHtml() {
-            const accountsToRender = this.state.accounts.filter(acc => this.state.showArchived || !acc.archived);
+            const accountsToRender = this.state.accounts.filter(acc => acc && (this.state.showArchived || !acc.arquivado));
             const cardsHtml = accountsToRender.map(account => this.generateCardHTML(account)).join('');
             const emptyState = `<div class="empty-state"><i class="fa-solid fa-piggy-bank"></i><p>Nenhuma conta para exibir.<br>Clique em "Adicionar Conta" para começar.</p></div>`;
             return `
@@ -396,6 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         generateCardHTML(account) {
+            if (!account) return '';
             const textColor = this.getContrastColor(account.color);
             let icon, mainLabel, mainValue, footerInfo = '';
             const openInvoice = account.type === 'Cartão de Crédito' ? this.calculateInvoiceDetails(account.id, true).openInvoiceTotal : 0;
@@ -411,7 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 footerInfo = `<div class="card-footer"><span class="label">Limite Disponível</span><span class="value">${this.formatCurrency(availableLimit)}</span></div>`;
             }
             return `
-            <div class="account-card-display ${account.archived ? 'archived' : ''}" style="background-color: ${account.color || '#424242'}; color: ${textColor};">
+            <div class="account-card-display ${account.arquivado ? 'archived' : ''}" style="background-color: ${account.color || '#424242'}; color: ${textColor};">
                 <div class="card-content">
                     <div class="card-header">
                         <div class="icon-title"><i class="fa-solid ${icon}"></i><span>${account.name || 'Sem nome'}</span></div>
@@ -419,7 +436,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <ul class="card-actions-menu hidden" data-menu-id="${account.id}">
                             ${account.type === 'Conta Corrente' ? `<li data-action="adjust-balance" data-id="${account.id}"><i class="fa-solid fa-sack-dollar"></i> Ajustar Saldo</li>` : ''}
                             <li data-action="edit-account" data-id="${account.id}"><i class="fa-solid fa-pencil"></i> Editar</li>
-                            <li data-action="archive-account" data-id="${account.id}"><i class="fa-solid fa-archive"></i> ${account.archived ? 'Desarquivar' : 'Arquivar'}</li>
+                            <li data-action="archive-account" data-id="${account.id}"><i class="fa-solid fa-archive"></i> ${account.arquivado ? 'Desarquivar' : 'Arquivar'}</li>
                             <li data-action="delete-account" data-id="${account.id}" class="delete"><i class="fa-solid fa-trash-can"></i> Excluir</li>
                         </ul>
                     </div>
@@ -462,8 +479,8 @@ document.addEventListener('DOMContentLoaded', () => {
         renderSaidasSection() {
             const container = document.getElementById('saidas-section-container');
             if (!container) return;
-            const automaticFaturas = (this.state.planningData.despesas || []).filter(d => d.isAutomatic);
-            const manualDespesas = (this.state.planningData.despesas || []).filter(d => !d.isAutomatic);
+            const automaticFaturas = (this.state.planningData.despesas || []).filter(d => d && d.isAutomatic);
+            const manualDespesas = (this.state.planningData.despesas || []).filter(d => d && !d.isAutomatic);
             container.innerHTML = `
                 <div class="planning-subsection-header">Faturas de Cartão</div>
                 <div class="planning-list" data-list-type="faturas">
@@ -481,10 +498,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!listContainer) return;
             let items, type;
             if (listType === 'receitas') {
-                items = this.state.planningData.receitas || [];
+                items = (this.state.planningData.receitas || []).filter(i => !!i);
                 type = 'receitas';
             } else {
-                items = (this.state.planningData.despesas || []).filter(d => !d.isAutomatic);
+                items = (this.state.planningData.despesas || []).filter(d => d && !d.isAutomatic);
                 type = 'despesas';
             }
             listContainer.innerHTML = items.map(item => {
@@ -496,9 +513,9 @@ document.addEventListener('DOMContentLoaded', () => {
         updateSummary() {
             const summaryContainer = document.getElementById('planning-summary');
             if (!summaryContainer) return;
-            const despesasAPagar = (this.state.planningData.despesas || []).filter(item => !item.paid);
+            const despesasAPagar = (this.state.planningData.despesas || []).filter(item => item && !item.paid);
             const totalDespesas = despesasAPagar.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
-            const totalReceitas = (this.state.planningData.receitas || []).reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+            const totalReceitas = (this.state.planningData.receitas || []).filter(i => !!i).reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
             const saldo = totalReceitas - totalDespesas;
             summaryContainer.innerHTML = `
                 <div class="detail-row">
@@ -516,6 +533,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         getPlanningRowHtml(type, item, index) {
+            if (!item) return '';
             if (type === 'receitas') {
                 return `
                 <div class="planning-item income-item">
@@ -532,7 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`;
             }
             if (item.isAutomatic) {
-                const card = this.state.accounts.find(acc => acc.id === item.cardId);
+                const card = this.state.accounts.find(acc => acc && acc.id === item.cardId);
                 const cardColor = card ? card.color : '#cccccc';
                 return `
                 <div class="planning-item expense-item ${item.paid ? 'paid' : ''}">
@@ -581,10 +599,10 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             this.elements.viewContainer.addEventListener('keydown', this.elements.planningKeydownListener);
         },
-        
+
         handleViewContainerClick(e) {
-            const button = e.target.closest('[data-action]');
-            if (!button) {
+            const actionTarget = e.target.closest('[data-action]');
+            if (!actionTarget) {
                 const activeMenu = document.querySelector('.card-actions-menu:not(.hidden)');
                 if (activeMenu && !e.target.closest('.card-actions-button')) {
                     activeMenu.classList.add('hidden');
@@ -601,51 +619,76 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 return;
             }
-            const { action, id, type, index, cardId, chart } = button.dataset;
+        
+            const { action, id, type, index, cardId, chart } = actionTarget.dataset;
+        
             const actionHandlers = {
-                'show-lancar-form': () => this.renderLancamentoForm(button.dataset.formType),
+                'show-lancar-form': () => this.renderLancamentoForm(actionTarget.dataset.formType),
                 'cancel-lancar-form': () => document.getElementById('form-lancamento-container').innerHTML = '',
-                'change-chart-type': () => {
-                    this.state.dashboardChartType = chart;
-                    this.renderCurrentView();
-                },
+                'change-chart-type': () => { this.state.dashboardChartType = chart; this.renderCurrentView(); },
                 'add-account': () => this.showAccountModal(),
                 'edit-account': () => this.showAccountModal(id),
                 'delete-account': () => this.deleteItem('financeiro_contas', id, 'Conta'),
-                'archive-account': () => {
-                    const account = this.state.accounts.find(acc => acc.id === id);
-                    this.db.collection('financeiro_contas').doc(id).update({ archived: !account.archived });
-                },
+                'archive-account': () => { const account = this.state.accounts.find(acc => acc.id === id); this.db.collection('financeiro_contas').doc(id).update({ arquivado: !account.arquivado }); },
                 'adjust-balance': () => this.adjustAccountBalance(id),
-                'toggle-menu': () => {
-                    document.querySelectorAll('.card-actions-menu').forEach(menu => {
-                        if (menu.dataset.menuId !== id) menu.classList.add('hidden');
-                    });
-                    document.querySelector(`.card-actions-menu[data-menu-id="${id}"]`)?.classList.toggle('hidden');
-                },
-                'toggle-archived': () => {
-                    this.state.showArchived = !this.state.showArchived;
-                    this.renderCurrentView();
-                },
+                'toggle-menu': () => { document.querySelectorAll('.card-actions-menu').forEach(menu => { if (menu.dataset.menuId !== id) menu.classList.add('hidden'); }); document.querySelector(`.card-actions-menu[data-menu-id="${id}"]`)?.classList.toggle('hidden'); },
+                'toggle-archived': () => { this.state.showArchived = !this.state.showArchived; this.renderCurrentView(); },
                 'add-planning-item': () => this.addPlanningItem(type),
                 'delete-planning-item': () => this.deletePlanningItem(type, parseInt(index)),
                 'sync-invoice': () => this.syncInvoiceValue(parseInt(index), cardId),
-                'delete-transaction': () => {
-                    const transaction = this.state.allTransactions.find(t => t.id === id);
-                    this.deleteItem('financeiro_lancamentos', id, 'Lançamento', transaction);
-                },
+                'delete-transaction': () => { const transaction = this.state.allTransactions.find(t => t.id === id); this.deleteItem('financeiro_lancamentos', id, 'Lançamento', transaction); },
                 'show-filter-modal': () => this.showFilterModal(),
                 'show-sort-modal': () => this.showSortModal(),
-                'pay-invoice': () => {
-                    const { cardId, invoiceTotal, invoiceKey } = button.dataset;
-                    this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => { } }, { formType: 'pagarFatura', prefill: { destinationAccountId: cardId, value: parseFloat(invoiceTotal), invoiceMonthYear: invoiceKey } });
-                },
+                'pay-invoice': () => { const { cardId, invoiceTotal, invoiceKey } = actionTarget.dataset; this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => { } }, { formType: 'pagarFatura', prefill: { destinationAccountId: cardId, value: parseFloat(invoiceTotal), invoiceMonthYear: invoiceKey } }); },
                 'add-category': () => this.showCategoryModal(), 'edit-category': () => this.showCategoryModal(id), 'delete-category': () => this.deleteItem('financeiro_categorias', id, 'Categoria'),
                 'add-person': () => this.showPersonModal(), 'edit-person': () => this.showPersonModal(id), 'delete-person': () => this.deleteItem('financeiro_pessoas', id, 'Pessoa'),
                 'add-establishment': () => this.showEstablishmentModal(), 'edit-establishment': () => this.showEstablishmentModal(id), 'delete-establishment': () => this.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
             };
+        
             if (actionHandlers[action]) {
                 actionHandlers[action]();
+            }
+        },
+
+        handleFormSubmit(e) {
+            e.preventDefault();
+            const form = e.target.closest('form');
+            
+            if (!form) {
+                console.error("Handler de submit não encontrou um formulário.");
+                return;
+            }
+
+            const formId = form.getAttribute('id');
+            console.log(`Submissão de formulário detectada: #${formId}`);
+            
+            const formHandlers = {
+                'account-form': () => this.saveItem(e, 'financeiro_contas', 'Conta'),
+                'category-form': () => this.saveItem(e, 'financeiro_categorias', 'Categoria'),
+                'person-form': () => this.saveItem(e, 'financeiro_pessoas', 'Pessoa'),
+                'establishment-form': () => this.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento'),
+                'transaction-form': () => this.saveTransaction(form, true),
+                'lancar-form': () => this.saveTransaction(form),
+                'filter-form': () => {
+                    const formData = new FormData(form);
+                    this.state.movementsFilter.type = formData.get('type');
+                    this.state.movementsFilter.accountId = formData.get('accountId');
+                    this.closeModal();
+                    this.renderCurrentView();
+                },
+                'sort-form': () => {
+                    const formData = new FormData(form);
+                    const [key, order] = formData.get('sort').split('-');
+                    this.state.movementsSort = { key, order };
+                    this.closeModal();
+                    this.renderCurrentView();
+                }
+            };
+        
+            if (formHandlers[formId]) {
+                formHandlers[formId]();
+            } else {
+                console.warn(`Nenhum handler de submit encontrado para o formulário com id: ${formId}`);
             }
         },
 
@@ -667,15 +710,17 @@ document.addEventListener('DOMContentLoaded', () => {
             if (checkbox && this.state.currentView === 'planning') {
                 const { type, index } = checkbox.dataset;
                 const item = this.state.planningData[type][parseInt(index)];
-                item.paid = checkbox.checked;
-                this.savePlanningData();
-                const planningItem = checkbox.closest('.planning-item');
-                planningItem.classList.toggle('paid', checkbox.checked);
-                const inputFields = planningItem.querySelectorAll('.planning-input');
-                inputFields.forEach(input => {
-                    input.style.textDecoration = checkbox.checked ? 'line-through' : 'none';
-                });
-                this.updateSummary();
+                if (item) {
+                    item.paid = checkbox.checked;
+                    this.savePlanningData();
+                    const planningItem = checkbox.closest('.planning-item');
+                    planningItem.classList.toggle('paid', checkbox.checked);
+                    const inputFields = planningItem.querySelectorAll('.planning-input');
+                    inputFields.forEach(input => {
+                        input.style.textDecoration = checkbox.checked ? 'line-through' : 'none';
+                    });
+                    this.updateSummary();
+                }
                 return;
             }
             if (e.target.id === 'lancar-saida-account') {
@@ -687,40 +732,10 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
         
-        handleViewContainerSubmit(e) {
-            e.preventDefault();
-            const formId = e.target.id;
-            const submitHandlers = {
-                'lancar-form': () => this.saveTransaction(e),
-                'account-form': () => this.saveItem(e, 'financeiro_contas', 'Conta'),
-                'transaction-form': () => this.saveTransaction(e, true),
-                'category-form': () => this.saveItem(e, 'financeiro_categorias', 'Categoria'),
-                'generic-form': () => {
-                    const formType = e.target.dataset.formType;
-                    if (formType === 'person') this.saveItem(e, 'financeiro_pessoas', 'Pessoa');
-                    if (formType === 'establishment') this.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento');
-                },
-                'filter-form': () => {
-                    const formData = new FormData(e.target);
-                    this.state.movementsFilter.type = formData.get('type');
-                    this.state.movementsFilter.accountId = formData.get('accountId');
-                    this.closeModal();
-                    this.renderCurrentView();
-                },
-                'sort-form': () => {
-                    const formData = new FormData(e.target);
-                    const [key, order] = formData.get('sort').split('-');
-                    this.state.movementsSort = { key, order };
-                    this.closeModal();
-                    this.renderCurrentView();
-                }
-            };
-            if (submitHandlers[formId]) submitHandlers[formId]();
-        },
-        
         getTransactionHtml(transaction, showAccount = true) {
-            const category = this.state.categories.find(c => c.id === transaction.categoryId);
-            const account = this.state.accounts.find(a => a.id === transaction.accountId);
+            if (!transaction || !transaction.id) return '';
+            const category = this.state.categories.find(c => c && c.id === transaction.categoryId);
+            const account = this.state.accounts.find(a => a && a.id === transaction.accountId);
             let isPositive = transaction.type === 'Entrada';
             let amountClass = isPositive ? 'positive' : 'negative';
             let amountSign = isPositive ? '+' : '-';
@@ -742,7 +757,7 @@ document.addEventListener('DOMContentLoaded', () => {
         renderLancamentoForm(type, prefillData = {}) {
             const container = document.getElementById('form-lancamento-container');
             if (!container) return;
-            const accounts = this.state.accounts.filter(a => !a.archived) || [];
+            const accounts = this.state.accounts.filter(a => a && !a.arquivado) || [];
             const checkingAccounts = accounts.filter(a => a.type === 'Conta Corrente');
             const creditCards = accounts.filter(a => a.type === 'Cartão de Crédito');
             const getOptions = (items = [], selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
@@ -769,21 +784,24 @@ document.addEventListener('DOMContentLoaded', () => {
             container.innerHTML = `<div class="card"><form id="lancar-form" data-type="${type}" novalidate><h3 class="card-title" style="font-size: 20px;">${title}</h3>${formHtml}<div class="form-actions"><button type="button" class="button-secondary" data-action="cancel-lancar-form">Cancelar</button><button type="submit" class="button-primary"><i class="fa-solid fa-check"></i> Salvar</button></div></form></div>`;
             
             setTimeout(() => {
-                const formCard = container.querySelector('.card');
-                if (formCard) {
-                    formCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                const mainContent = document.querySelector('.main-content');
+                if (container && mainContent) {
+                    const headerHeight = document.querySelector('.main-header')?.offsetHeight || 80;
+                    const targetPosition = container.offsetTop - headerHeight - 20;
+                    mainContent.scrollTo({
+                        top: targetPosition,
+                        behavior: 'smooth'
+                    });
                 }
             }, 100);
         },
         
-        async saveTransaction(e, isEdit = false) {
-            e.preventDefault();
-            const form = e.target;
+        async saveTransaction(form, isEdit = false) {
             const type = isEdit ? this.state.allTransactions.find(t => t.id === (new FormData(form)).get('id'))?.type : form.dataset.type;
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
             const id = data.id;
-            const submitButton = form.querySelector('button[type="submit"]');
+            const submitButton = form.querySelector('[type="submit"]');
             submitButton.disabled = true;
             submitButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Salvando...`;
             const batch = this.db.batch();
@@ -852,7 +870,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.error("Erro ao salvar lançamento:", error);
                 this.showToast(error.message || 'Ocorreu um erro ao salvar.', 'error');
             } finally {
-                if (!isEdit && submitButton) {
+                if (submitButton) {
                     submitButton.disabled = false;
                     submitButton.innerHTML = `<i class="fa-solid fa-check"></i> Salvar`;
                 }
@@ -860,20 +878,52 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         async saveItem(e, collection, itemName) {
-            e.preventDefault();
-            const form = e.target, formData = new FormData(form), data = Object.fromEntries(formData.entries());
-            if (data.balance) data.balance = parseFloat(String(data.balance).replace(',', '.')) || 0;
-            if (data.limit) data.limit = parseFloat(String(data.limit).replace(',', '.')) || 0;
-            const id = data.id; delete data.id;
+            const form = e.target.closest('form');
+            const submitButton = form.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Salvando...`;
+            }
+
             try {
-                if (id) await this.db.collection(collection).doc(id).update(data);
-                else {
-                    if (itemName === 'Conta') data.archived = false;
+                const formData = new FormData(form);
+                const data = Object.fromEntries(formData.entries());
+                const id = data.id;
+                delete data.id;
+            
+                if (itemName === 'Conta') {
+                    if (data.type === 'Cartão de Crédito') {
+                        data.limit = parseFloat(String(data.limit).replace(',', '.')) || 0;
+                        data.dueDate = data.dueDate || "";
+                        data.closingDay = data.closingDay || "";
+                        delete data.balance;
+                    } else {
+                        data.balance = parseFloat(String(data.balance).replace(',', '.')) || 0;
+                        delete data.limit;
+                        delete data.dueDate;
+                        delete data.closingDay;
+                    }
+                }
+                
+                console.log(`Salvando ${itemName}:`, data);
+                if (id) {
+                    await this.db.collection(collection).doc(id).update(data);
+                } else {
+                    if (itemName === 'Conta') data.arquivado = false;
                     await this.db.collection(collection).add(data);
                 }
                 this.showToast(`${itemName} salvo com sucesso!`, 'success');
                 this.closeModal();
-            } catch (error) { this.showToast(`Erro ao salvar ${itemName}.`, 'error'); }
+
+            } catch (error) {
+                this.showToast(`Erro ao salvar ${itemName}.`, 'error');
+                console.error(`Erro em saveItem para ${collection}:`, error);
+            } finally {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = `Salvar`;
+                }
+            }
         },
         
         async deleteItem(collection, id, itemName, transactionToDelete = null) {
@@ -896,8 +946,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         transactionsToDelete.push(transactionToDelete);
                     }
                     for (const trans of transactionsToDelete) {
-                        batch.delete(this.db.collection(collection).doc(trans.id));
-                        this.updateAccountBalance(trans.accountId, trans.value, trans.type, true, batch);
+                        if (trans && trans.id) {
+                            batch.delete(this.db.collection(collection).doc(trans.id));
+                            this.updateAccountBalance(trans.accountId, trans.value, trans.type, true, batch);
+                        }
                     }
                 } else {
                     const fieldToCheck = { 'financeiro_contas': 'accountId', 'financeiro_categorias': 'categoryId', 'financeiro_pessoas': 'personId', 'financeiro_estabelecimentos': 'establishmentId' }[collection];
@@ -908,11 +960,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 await batch.commit();
                 this.showToast(`${itemName} excluído com sucesso.`, 'success');
                 this.closeModal();
-            } catch (error) { this.showToast(error.message || `Erro ao excluir ${itemName}.`, 'error'); }
+            } catch (error) { this.showToast(error.message || `Erro ao excluir ${itemName}.`, 'error'); console.error(error); }
         },
         
         updateAccountBalance(accountId, value, type, revert = false, batch) {
-            const account = this.state.accounts.find(a => a.id === accountId);
+            const account = this.state.accounts.find(a => a && a.id === accountId);
             if (account?.type === 'Conta Corrente') {
                 let valueToIncrement = (type === 'Entrada' || type === 'Transferência') ? value : -value;
                 if (type === 'Pagamento de Fatura') valueToIncrement = -value;
@@ -924,7 +976,57 @@ document.addEventListener('DOMContentLoaded', () => {
         showAccountModal(accountId = null) {
             const isEditing = !!accountId;
             const account = isEditing ? this.state.accounts.find(a => a.id === accountId) : {};
-            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="account-form"><input type="hidden" name="id" value="${account?.id || ''}"><div class="modal-header"><h2>${isEditing ? 'Editar' : 'Nova'} Conta</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${account?.name || ''}" required></div><div class="form-group"><label>Tipo</label><select name="type" id="account-type"><option value="Conta Corrente" ${account?.type === 'Conta Corrente' ? 'selected' : ''}>Conta Corrente</option><option value="Cartão de Crédito" ${account?.type === 'Cartão de Crédito' ? 'selected' : ''}>Cartão de Crédito</option></select></div><div class="form-group color-picker"><label>Cor</label><input type="color" name="color" value="${account?.color || '#007aff'}"></div><div class="form-group" id="balance-limit-group"><label>Saldo Inicial</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" step="0.01" name="balance" value="${account?.balance || ''}" placeholder="0,00"></div></div><div id="credit-card-fields" class="hidden"><div class="form-group"><label>Dia do Vencimento</label><input type="number" min="1" max="31" name="dueDate" value="${account?.dueDate || ''}"></div><div class="form-group"><label>Dia do Fechamento</label><input type="number" min="1" max="31" name="closingDay" value="${account?.closingDay || ''}"></div></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div></form></div>`;
+            const accountColor = account?.color || '#007aff';
+            
+            this.elements.modalContainer.innerHTML = `
+                <div class="modal-content">
+                    <form id="account-form">
+                        <input type="hidden" name="id" value="${account?.id || ''}">
+                        <div class="modal-header">
+                            <h2>${isEditing ? 'Editar' : 'Nova'} Conta</h2>
+                            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                <label>Nome</label>
+                                <input type="text" name="name" value="${account?.name || ''}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Tipo</label>
+                                <select name="type" id="account-type">
+                                    <option value="Conta Corrente" ${account?.type === 'Conta Corrente' ? 'selected' : ''}>Conta Corrente</option>
+                                    <option value="Cartão de Crédito" ${account?.type === 'Cartão de Crédito' ? 'selected' : ''}>Cartão de Crédito</option>
+                                </select>
+                            </div>
+                            <div class="form-group color-picker">
+                                <label>Cor</label>
+                                <input type="color" name="color" value="${accountColor}">
+                            </div>
+                            <div class="form-group" id="balance-limit-group">
+                                <label>Saldo Inicial</label>
+                                <div class="input-group-currency">
+                                    <span class="currency-symbol">R$</span>
+                                    <input type="number" step="0.01" name="balance" value="${account?.balance || ''}" placeholder="0,00">
+                                </div>
+                            </div>
+                            <div id="credit-card-fields" class="hidden">
+                                <div class="form-group">
+                                    <label>Dia do Vencimento</label>
+                                    <input type="number" min="1" max="31" name="dueDate" value="${account?.dueDate || ''}">
+                                </div>
+                                <div class="form-group">
+                                    <label>Dia do Fechamento</label>
+                                    <input type="number" min="1" max="31" name="closingDay" value="${account?.closingDay || ''}">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                            <button type="submit" form="account-form" class="button-primary">Salvar</button>
+                        </div>
+                    </form>
+                </div>`;
+        
             const selector = document.getElementById('account-type');
             const toggleFields = () => {
                 const isCredit = selector.value === 'Cartão de Crédito';
@@ -935,52 +1037,94 @@ document.addEventListener('DOMContentLoaded', () => {
                 input.name = isCredit ? 'limit' : 'balance';
                 input.value = (isCredit ? account?.limit : account?.balance) || '';
             };
+                
             toggleFields();
             selector.onchange = toggleFields;
             this.setupModalEvents();
         },
         
-        adjustAccountBalance(accountId) {
+        async adjustAccountBalance(accountId) {
             const account = this.state.accounts.find(acc => acc.id === accountId);
+            if (!account) return;
+
             const newBalanceStr = prompt('Digite o novo saldo correto:', account.balance);
+
             if (newBalanceStr !== null) {
                 const newBalance = parseFloat(newBalanceStr.replace(',', '.'));
-                if (!isNaN(newBalance)) {
-                    this.db.collection('financeiro_contas').doc(accountId).update({ balance: newBalance });
-                    this.showToast('Saldo ajustado com sucesso!', 'success');
-                } else { this.showToast('Valor inválido.', 'error'); }
+                
+                if (isNaN(newBalance)) {
+                    this.showToast('Valor inválido.', 'error');
+                    return;
+                }
+
+                const oldBalance = parseFloat(account.balance) || 0;
+                const adjustmentValue = newBalance - oldBalance;
+
+                if (adjustmentValue === 0) {
+                    this.showToast('O saldo informado é o mesmo que o atual.', 'info');
+                    return;
+                }
+
+                const transactionType = adjustmentValue > 0 ? 'Entrada' : 'Saída';
+                const transactionValue = Math.abs(adjustmentValue);
+
+                const adjustmentTransaction = {
+                    accountId: accountId,
+                    date: firebase.firestore.Timestamp.now(),
+                    monthYear: `${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getFullYear()}`,
+                    description: "Ajuste de Saldo",
+                    type: transactionType,
+                    value: transactionValue,
+                    categoryId: ''
+                };
+
+                const batch = this.db.batch();
+                try {
+                    const accountRef = this.db.collection('financeiro_contas').doc(accountId);
+                    batch.update(accountRef, { balance: newBalance });
+
+                    const transactionRef = this.db.collection('financeiro_lancamentos').doc();
+                    batch.set(transactionRef, adjustmentTransaction);
+
+                    await batch.commit();
+                    
+                    this.showToast('Saldo ajustado e movimentação registrada!', 'success');
+                } catch (error) {
+                    console.error("Erro ao ajustar saldo:", error);
+                    this.showToast('Ocorreu um erro ao ajustar o saldo.', 'error');
+                }
             }
         },
         
         showCategoryModal(categoryId = null) {
             const category = categoryId ? this.state.categories.find(c => c.id === categoryId) : {};
-            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category.id ? 'Editar' : 'Nova'} Categoria</h2><button class="close-modal-btn" type="button"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div></form></div>`;
+            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category?.id ? 'Editar' : 'Nova'} Categoria</h2><button class="close-modal-btn" type="button"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="category-form" class="button-primary">Salvar</button></div></form></div>`;
             this.setupModalEvents();
         },
         
         showPersonModal(personId = null) {
             const person = personId ? this.state.people.find(p => p.id === personId) : {};
-            this.elements.modalContainer.innerHTML = this.getGenericModalHtml('Pessoa', person, 'person', [{ label: 'Nome', name: 'name', type: 'text', required: true }]);
+            this.elements.modalContainer.innerHTML = this.getGenericModalHtml('person-form', 'Pessoa', person, [{ label: 'Nome', name: 'name', type: 'text', required: true }]);
             this.setupModalEvents();
         },
         
         showEstablishmentModal(establishmentId = null) {
             const establishment = establishmentId ? this.state.establishments.find(e => e.id === establishmentId) : {};
-            this.elements.modalContainer.innerHTML = this.getGenericModalHtml('Estabelecimento', establishment, 'establishment', [{ label: 'Nome', name: 'name', type: 'text', required: true }]);
+            this.elements.modalContainer.innerHTML = this.getGenericModalHtml('establishment-form', 'Estabelecimento', establishment, [{ label: 'Nome', name: 'name', type: 'text', required: true }]);
             this.setupModalEvents();
         },
         
-        getGenericModalHtml(title, item = {}, formType, fields = []) {
-            return `<div class="modal-content"><form id="generic-form" data-form-type="${formType}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button class="close-modal-btn" type="button"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div></form></div>`;
+        getGenericModalHtml(formId, title, item = {}, fields = []) {
+            return `<div class="modal-content"><form id="${formId}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button class="close-modal-btn" type="button"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="${formId}" class="button-primary">Salvar</button></div></form></div>`;
         },
         
         showTransactionModal(transactionId) {
             const transaction = transactionId ? this.state.allTransactions.find(t => t.id === transactionId) : {};
-            if (!transaction.id || transaction.paymentId || transaction.installmentGroupId || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência') {
+            if (!transaction?.id || transaction.paymentId || transaction.installmentGroupId || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência') {
                 this.showToast("Este tipo de lançamento não pode ser editado.", "error");
                 return;
             }
-            this.elements.modalContainer.innerHTML = `<div class="modal-content"><div class="modal-header"><h2>Editar Lançamento</h2><button class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><form id="transaction-form" novalidate><input type="hidden" name="id" value="${transaction.id}"><div class="form-group"><label>Tipo</label><input type="text" value="${transaction.type}" disabled></div><div id="transaction-fields-container"></div></form></div><div class="modal-actions"><button type="button" class="button-secondary" data-action="delete-transaction" data-id="${transaction.id}">Excluir</button><button type="submit" form="transaction-form" class="button-primary">Salvar</button></div></div>`;
+            this.elements.modalContainer.innerHTML = `<div class="modal-content"><div class="modal-header"><h2>Editar Lançamento</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><form id="transaction-form" novalidate><input type="hidden" name="id" value="${transaction.id}"><div class="form-group"><label>Tipo</label><input type="text" value="${transaction.type}" disabled></div><div id="transaction-fields-container"></div></form></div><div class="modal-actions"><button type="button" class="button-secondary" data-action="delete-transaction" data-id="${transaction.id}">Excluir</button><button type="submit" form="transaction-form" class="button-primary">Salvar</button></div></div>`;
             this.renderTransactionFormFields_old(transaction);
             this.setupModalEvents();
         },
@@ -989,7 +1133,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const container = document.getElementById('transaction-fields-container');
             const getOptions = (items = [], selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
             const dateInputValue = data.date ? this.getLocalISODate(this.getDateObject(data.date)) : this.getLocalISODate();
-            container.innerHTML = `<div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" value="${data.value || ''}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Descrição</label><input type="text" name="description" value="${data.description || ''}" required></div><div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(this.state.accounts.filter(a => !a.archived), data.accountId)}</select></div><div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(this.state.categories, data.categoryId)}</select></div><div class="form-group"><label>Pessoa</label><select name="personId"><option value="">Nenhuma</option>${getOptions(this.state.people, data.personId)}</select></div><div class="form-group"><label>Estabelecimento</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(this.state.establishments, data.establishmentId)}</select></div>`;
+            container.innerHTML = `<div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" value="${data.value || ''}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Descrição</label><input type="text" name="description" value="${data.description || ''}" required></div><div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(this.state.accounts.filter(a => !a.arquivado), data.accountId)}</select></div><div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(this.state.categories, data.categoryId)}</select></div><div class="form-group"><label>Pessoa</label><select name="personId"><option value="">Nenhuma</option>${getOptions(this.state.people, data.personId)}</select></div><div class="form-group"><label>Estabelecimento</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(this.state.establishments, data.establishmentId)}</select></div>`;
         },
         
         setupModalEvents() {
@@ -1012,11 +1156,11 @@ document.addEventListener('DOMContentLoaded', () => {
             let emptyMessage = "Nenhuma saída no mês";
             switch (this.state.dashboardChartType) {
                 case 'establishment':
-                    expenseData.forEach(t => { if (t.establishmentId) { const name = this.findItemName(t.establishmentId, 'establishments'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; } });
+                    expenseData.forEach(t => { if (t?.establishmentId) { const name = this.findItemName(t.establishmentId, 'establishments'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; } });
                     emptyMessage = "Nenhuma saída por estabelecimento.";
                     break;
                 case 'person':
-                    expenseData.forEach(t => { if (t.personId) { const name = this.findItemName(t.personId, 'people'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; } });
+                    expenseData.forEach(t => { if (t?.personId) { const name = this.findItemName(t.personId, 'people'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; } });
                     emptyMessage = "Nenhuma saída por pessoa.";
                     break;
                 default:
@@ -1030,26 +1174,26 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         calculateCreditCardUsage(cardId) {
-            const cardTransactions = this.state.allTransactions.filter(t => t.accountId === cardId);
+            const cardTransactions = this.state.allTransactions.filter(t => t && t.accountId === cardId);
             const totalSpent = cardTransactions.filter(t => t.type === 'Saída').reduce((sum, t) => sum + t.value, 0);
             const totalPaid = cardTransactions.filter(t => t.type === 'Pagamento de Fatura').reduce((sum, t) => sum + t.value, 0);
             return totalSpent - totalPaid;
         },
         
         isInvoicePaid(cardId, invoiceMonthYear) {
-            return this.state.allTransactions.some(t => t.type === 'Pagamento de Fatura' && t.destinationAccountId === cardId && t.invoiceMonthYear === invoiceMonthYear);
+            return this.state.allTransactions.some(t => t && t.type === 'Pagamento de Fatura' && t.destinationAccountId === cardId && t.invoiceMonthYear === invoiceMonthYear);
         },
         
         calculateInvoiceDetails(cardId, useCurrentDate = false) {
-            const card = this.state.accounts.find(a => a.id === cardId);
+            const card = this.state.accounts.find(a => a && a.id === cardId);
             if (!card || !card.closingDay) return { openInvoiceTotal: 0 };
             const referenceDate = useCurrentDate ? new Date() : this.getDateFromMonthYear(this.state.currentMonthYear);
             let closingDateForInvoice = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), card.closingDay);
             if (referenceDate.getDate() > card.closingDay) { closingDateForInvoice.setMonth(closingDateForInvoice.getMonth() + 1); }
             let closingDateForPreviousInvoice = new Date(closingDateForInvoice);
             closingDateForPreviousInvoice.setMonth(closingDateForPreviousInvoice.getMonth() - 1);
-            const openInvoiceTransactions = this.state.allTransactions.filter(t => t.accountId === cardId && t.type === 'Saída' && this.getDateObject(t.date) > closingDateForPreviousInvoice && this.getDateObject(t.date) <= closingDateForInvoice);
-            const totalExpenses = openInvoiceTransactions.reduce((sum, t) => sum + t.value, 0);
+            const openInvoiceTransactions = this.state.allTransactions.filter(t => t && t.accountId === cardId && t.type === 'Saída' && this.getDateObject(t.date) > closingDateForPreviousInvoice && this.getDateObject(t.date) <= closingDateForInvoice);
+            const totalExpenses = openInvoiceTransactions.reduce((sum, t) => sum + (t.value || 0), 0);
             return { openInvoiceTotal: totalExpenses };
         },
         
@@ -1061,7 +1205,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
             const renderInvoice = () => {
                 const cardId = cardSelector.value;
-                const card = this.state.accounts.find(a => a.id === cardId);
+                const card = this.state.accounts.find(a => a && a.id === cardId);
                 if (!card) {
                     detailsContainer.innerHTML = '<div class="empty-state"><p>Selecione um cartão.</p></div>';
                     return;
@@ -1070,7 +1214,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const currentOpenInvoiceKey = this.getInvoiceKeyForDate(new Date(), card);
         
                 const transactionsByInvoice = this.state.allTransactions
-                    .filter(t => t.accountId === cardId && t.type === 'Saída')
+                    .filter(t => t && t.accountId === cardId && t.type === 'Saída')
                     .reduce((acc, t) => {
                         const invoiceKey = this.getInvoiceKeyForDate(this.getDateObject(t.date), card);
                         if (!acc[invoiceKey]) acc[invoiceKey] = [];
@@ -1151,6 +1295,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         getInvoiceKeyForDate(date, card) {
+            if (!date || !card || !card.closingDay) return '';
             let invoiceDate = new Date(date);
             if (date.getDate() > card.closingDay) {
                 invoiceDate.setMonth(invoiceDate.getMonth() + 1);
@@ -1171,7 +1316,8 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         findItemName(id, collectionName) {
-            const item = (this.state[collectionName] || []).find(c => c.id === id);
+            const collection = this.state[collectionName] || [];
+            const item = collection.find(c => c && c.id === id);
             return item ? item.name : 'N/A';
         },
         
@@ -1185,8 +1331,8 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         showInstallmentDetailsModal(installmentGroupId) {
-             const installments = this.state.allTransactions
-                .filter(t => t.installmentGroupId === installmentGroupId)
+            const installments = this.state.allTransactions
+                .filter(t => t && t.installmentGroupId === installmentGroupId)
                 .sort((a, b) => this.getDateObject(a.date) - this.getDateObject(b.date));
             if (installments.length === 0) return;
             const originalDescription = installments[0].description.replace(/ \[\d+\/\d+\]$/, '');
@@ -1311,10 +1457,10 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         
         generateAutomaticInvoiceItems(planningData) {
-            const creditCards = this.state.accounts.filter(acc => acc.type === 'Cartão de Crédito' && !acc.archived);
-            const manualDespesas = (planningData.despesas || []).filter(d => !d.isAutomatic);
+            const creditCards = this.state.accounts.filter(acc => acc && acc.type === 'Cartão de Crédito' && !acc.arquivado);
+            const manualDespesas = (planningData.despesas || []).filter(d => d && !d.isAutomatic);
             const automaticFaturas = creditCards.map(card => {
-                const existing = (planningData.despesas || []).find(d => d.isAutomatic && d.cardId === card.id);
+                const existing = (planningData.despesas || []).find(d => d && d.isAutomatic && d.cardId === card.id);
                 return existing || { description: `Fatura ${card.name}`, value: 0, paid: false, isAutomatic: true, cardId: card.id };
             });
             planningData.despesas = [...automaticFaturas, ...manualDespesas];
@@ -1344,14 +1490,14 @@ document.addEventListener('DOMContentLoaded', () => {
         
         deletePlanningItem(type, index) {
             if (this.state.planningData[type]?.[index]) {
-                 this.state.planningData[type].splice(index, 1);
-                 this.savePlanningData();
-                 this.renderAllPlanningSections();
+                this.state.planningData[type].splice(index, 1);
+                this.savePlanningData();
+                this.renderAllPlanningSections();
             }
         },
         
         syncInvoiceValue(itemIndex, cardId) {
-            const card = this.state.accounts.find(a => a.id === cardId);
+            const card = this.state.accounts.find(a => a && a.id === cardId);
             if (!card) return;
             const invoiceDetails = this.calculateInvoiceDetails(cardId, true);
             this.state.planningData.despesas[itemIndex].value = invoiceDetails.openInvoiceTotal;
