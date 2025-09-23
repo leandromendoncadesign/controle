@@ -71,6 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
         checkLogin() {
             const loginForm = document.getElementById('login-form');
             if (!loginForm) return;
+            const emailInput = document.getElementById('email-input');
             const passwordInput = document.getElementById('password-input');
             const errorMessage = document.getElementById('error-message');
             const attemptLogin = () => {
@@ -84,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const startApp = () => {
                 this.elements.authContainer.style.display = 'none';
-                this.elements.appRoot.style.visibility = 'visible';
+                this.elements.appRoot.classList.add('is-visible');
                 this.elements.body.classList.remove('is-loading');
                 this.attachEventListeners();
                 this.setCurrentMonthYear();
@@ -93,7 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.elements.authContainer.style.display = 'flex';
                 this.elements.appRoot.style.visibility = 'hidden';
                 this.elements.body.classList.remove('is-loading');
-                passwordInput.focus();
+                emailInput.focus();
             };
             loginForm.onsubmit = (e) => {
                 e.preventDefault();
@@ -175,7 +176,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 new Promise(resolve => {
                     const listener = this.db.collection(col).onSnapshot(snap => {
                         this.state[stateKey] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        if (!this.state.isLoading) this.renderCurrentView();
+                        if (!this.state.isLoading) {
+                            const viewsToUpdate = ['accounts', 'settings', 'lancar', 'movements', 'invoices'];
+                            if(viewsToUpdate.includes(this.state.currentView)) {
+                                this.renderCurrentView();
+                            }
+                        }
                         resolve();
                     }, console.error);
                     this.state.listeners.push(listener);
@@ -185,8 +191,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.state.allTransactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 this.populateMonthSelector();
                 Promise.all(promises).then(() => {
+                    const wasLoading = this.state.isLoading;
                     this.state.isLoading = false;
-                    this.render();
+                    const viewsToUpdate = ['resumos', 'movements', 'invoices', 'planning'];
+                    if (wasLoading || viewsToUpdate.includes(this.state.currentView)) {
+                        this.render();
+                    }
                 });
             }, console.error);
             this.state.listeners.push(transactionsListener);
@@ -771,7 +781,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const accounts = this.state.accounts.filter(a => a && !a.arquivado) || [];
             const checkingAccounts = accounts.filter(a => a.type === 'Conta Corrente');
             const creditCards = accounts.filter(a => a.type === 'Cartão de Crédito');
-            const getOptions = (items = [], selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
+            
+            const getOptions = (items = [], selectedId) => {
+                // Cria uma cópia e ordena alfabeticamente pelo nome antes de gerar as opções
+                return [...items]
+                    .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+                    .map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`)
+                    .join('');
+            };
+
             const dateInputValue = prefillData.date || this.getLocalISODate();
             let formHtml = '', title = '';
 
@@ -899,7 +917,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 await batch.commit();
 
                 if (!isEdit) {
-                    document.getElementById('form-lancamento-container').innerHTML = '';
+                    // Limpa apenas os campos de descrição e valor para facilitar lançamentos múltiplos
+                    form.querySelector('[name="description"]').value = '';
+                    form.querySelector('[name="value"]').value = '';
+                    // Foca no campo de descrição para o próximo lançamento
+                    form.querySelector('[name="description"]').focus();
                     sessionStorage.removeItem('lancamentoFormState');
                 } else {
                     this.closeModal();
@@ -1284,13 +1306,15 @@ document.addEventListener('DOMContentLoaded', () => {
         calculateInvoiceDetails(cardId, useCurrentDate = false) {
             const card = this.state.accounts.find(a => a && a.id === cardId);
             if (!card || !card.closingDay) return { openInvoiceTotal: 0 };
+            
             const referenceDate = useCurrentDate ? new Date() : this.getDateFromMonthYear(this.state.currentMonthYear);
-            let closingDateForInvoice = new Date(referenceDate.getFullYear(), referenceDate.getMonth(), card.closingDay);
-            if (referenceDate.getDate() > card.closingDay) { closingDateForInvoice.setMonth(closingDateForInvoice.getMonth() + 1); }
-            let closingDateForPreviousInvoice = new Date(closingDateForInvoice);
-            closingDateForPreviousInvoice.setMonth(closingDateForPreviousInvoice.getMonth() - 1);
-            const openInvoiceTransactions = this.state.allTransactions.filter(t => t && t.accountId === cardId && t.type === 'Saída' && this.getDateObject(t.date) > closingDateForPreviousInvoice && this.getDateObject(t.date) <= closingDateForInvoice);
-            const totalExpenses = openInvoiceTransactions.reduce((sum, t) => sum + (t.value || 0), 0);
+            const invoiceKey = this.getInvoiceKeyForDate(referenceDate, card);
+
+            const transactionsForInvoice = this.state.allTransactions
+                .filter(t => t && t.accountId === cardId && t.type === 'Saída')
+                .filter(t => this.getInvoiceKeyForDate(this.getDateObject(t.date), card) === invoiceKey);
+
+            const totalExpenses = transactionsForInvoice.reduce((sum, t) => sum + (t.value || 0), 0);
             return { openInvoiceTotal: totalExpenses };
         },
         postRenderInvoices() {
@@ -1337,18 +1361,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 transactionsForPeriod.sort((a, b) => this.getDateObject(b.date) - this.getDateObject(a.date));
                 const invoiceTotal = transactionsForPeriod.reduce((sum, t) => sum + t.value, 0);
                 const isPaid = this.isInvoicePaid(cardId, currentPeriodKey);
+                
                 const [month, year] = currentPeriodKey.split('-');
-                const dueDate = new Date(year, month - 1, card.dueDate);
+                const dueDate = card.dueDate ? new Date(year, parseInt(month, 10) - 1, card.dueDate) : null;
+                if (dueDate && card.dueDate < card.closingDay) {
+                    dueDate.setMonth(dueDate.getMonth() + 1);
+                }
+
                 detailsContainer.innerHTML = `
                 <div class="card-details">
                 <div class="detail-row">
                 <span class="label"><strong>Total da Fatura</strong></span>
                 <span class="value negative">${this.formatCurrency(invoiceTotal)}</span>
                 </div>
+                ${dueDate ? `
                 <div class="detail-row">
                 <span class="label">Vencimento</span>
                 <span class="value">${dueDate.toLocaleDateString('pt-BR')}</span>
-                </div>
+                </div>` : ''}
                 <div class="detail-row">
                 <span class="label">Status</span>
                 <span class="value ${isPaid ? 'positive' : 'negative'}">${isPaid ? 'Paga' : 'Aberta'}</span>
@@ -1377,11 +1407,22 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         getInvoiceKeyForDate(date, card) {
             if (!date || !card || !card.closingDay) return '';
-            let invoiceDate = new Date(date);
-            if (date.getDate() > card.closingDay) {
-                invoiceDate.setMonth(invoiceDate.getMonth() + 1);
+            
+            const transactionDate = this.getDateObject(date);
+            let invoiceYear = transactionDate.getFullYear();
+            let invoiceMonth = transactionDate.getMonth() + 1; // getMonth é 0-indexado, então +1 para 1-12
+
+            // Se o dia da transação for maior que o dia de fechamento,
+            // ela pertence à fatura do mês seguinte.
+            if (transactionDate.getDate() > card.closingDay) {
+                invoiceMonth += 1;
+                if (invoiceMonth > 12) {
+                    invoiceMonth = 1;
+                    invoiceYear += 1;
+                }
             }
-            return `${(invoiceDate.getMonth() + 1).toString().padStart(2, '0')}-${invoiceDate.getFullYear()}`;
+            
+            return `${invoiceMonth.toString().padStart(2, '0')}-${invoiceYear}`;
         },
         capitalizeFirstLetter(string) { return string ? string.charAt(0).toUpperCase() + string.slice(1) : ''; },
         formatCurrency(value) { return (parseFloat(value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); },
