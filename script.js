@@ -18,7 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
             movementsSort: { key: 'date', order: 'desc' },
             movementsFilter: { type: 'all', accountId: 'all' },
             showArchived: false,
-            lancamentoFormState: null, 
         },
         config: {
             firebase: { apiKey: "AIzaSyBbJnhZuL5f9v7KYjJRa1uGY9g17JXkYlo", authDomain: "dadosnf-38b2f.firebaseapp.com", projectId: "dadosnf-38b2f", storageBucket: "dadosnf-38b2f.firebasestorage.app", messagingSenderId: "103044936313", appId: "1:103044936313:web:e0f1ad680cd31445a1daa8" }
@@ -27,6 +26,7 @@ document.addEventListener('DOMContentLoaded', () => {
             planningKeydownListener: null
         },
         planningSaveTimeout: null,
+        closeModalTimeout: null,
 
         // ======================================================================
         // INICIALIZAÇÃO E NAVEGAÇÃO
@@ -118,16 +118,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (form) {
                     const formData = new FormData(form);
                     const formState = Object.fromEntries(formData.entries());
-                    formState.formType = form.dataset.type;
-                    this.state.lancamentoFormState = formState;
+                    if (Object.values(formState).some(val => val !== '')) {
+                        formState.formType = form.dataset.type;
+                        sessionStorage.setItem('lancamentoFormState', JSON.stringify(formState));
+                    } else {
+                        sessionStorage.removeItem('lancamentoFormState');
+                    }
                 }
             }
 
             e.preventDefault();
             const view = e.currentTarget.dataset.view;
+            
             if (this.state.currentView === view && !data) return;
+
             this.state.currentView = view;
             this.render();
+            
             if (view === 'lancar' && data) {
                 this.renderLancamentoForm(data.formType, data.prefill);
             }
@@ -234,6 +241,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const viewContainer = this.elements.viewContainer;
             const oldView = viewContainer.querySelector('.view-wrapper');
             const scrollY = mainContent.scrollTop;
+            
             if (this.elements.planningKeydownListener) {
                 viewContainer.removeEventListener('keydown', this.elements.planningKeydownListener);
                 this.elements.planningKeydownListener = null;
@@ -246,13 +254,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 await this.loadPlanningData();
             }
             
-            if (this.state.currentView === 'lancar' && this.state.lancamentoFormState) {
-                const { formType, ...prefillData } = this.state.lancamentoFormState;
-                this.renderLancamentoForm(formType, prefillData);
-                this.state.lancamentoFormState = null; 
-                return; 
-            }
-
             let newViewHtml = '';
             switch (this.state.currentView) {
                 case 'resumos': newViewHtml = this.getResumosHtml(); break;
@@ -267,15 +268,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const newView = document.createElement('div');
             newView.className = 'view-wrapper';
             newView.innerHTML = `<div class="screen-content">${newViewHtml}</div>`;
-            if (oldView) {
-                viewContainer.appendChild(newView);
-                newView.classList.add('slide-in-active');
-                oldView.remove();
-            } else {
-                viewContainer.innerHTML = '';
-                viewContainer.appendChild(newView);
-            }
+            
+            viewContainer.innerHTML = ''; 
+            viewContainer.appendChild(newView);
+
             mainContent.scrollTop = scrollY;
+            
             if (this.state.currentView === 'resumos') {
                 const transactionsThisMonth = this.state.allTransactions.filter(t => t.monthYear === this.state.currentMonthYear);
                 this.createDashboardChart(transactionsThisMonth);
@@ -285,6 +283,14 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (this.state.currentView === 'planning') {
                 this.postRenderPlanning();
+            }
+            if (this.state.currentView === 'lancar') {
+                const savedState = sessionStorage.getItem('lancamentoFormState');
+                if (savedState) {
+                    const { formType, ...prefillData } = JSON.parse(savedState);
+                    this.renderLancamentoForm(formType, prefillData);
+                    sessionStorage.removeItem('lancamentoFormState');
+                }
             }
         },
 
@@ -463,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="planning-section">
             <div class="planning-section-header">
             <h3><div class="section-icon"><i class="fa-solid fa-arrow-up"></i></div> Entradas Previstas</h3>
-            <button class="button-add" data-action="add-planning-item" data-type="receitas"><i class="fa-solid fa-plus"></i> Adicionar</button>
+            <button class="button-primary" data-action="add-planning-item" data-type="receitas"><i class="fa-solid fa-plus"></i> Adicionar</button>
             </div>
             <div class="planning-list" data-list-type="receitas"><div class="loading-spinner small"></div></div>
             </div>
@@ -496,7 +502,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="planning-list" data-list-type="outrasDespesas">
             ${manualDespesas.map(item => this.getPlanningRowHtml('despesas', item, this.state.planningData.despesas.indexOf(item))).join('')}
             </div>
-            <button class="button-add" data-action="add-planning-item" data-type="despesas" style="margin-top: 16px;"><i class="fa-solid fa-plus"></i> Adicionar Outra Despesa</button>`;
+            <button class="button-primary" data-action="add-planning-item" data-type="despesas" style="margin-top: 16px;"><i class="fa-solid fa-plus"></i> Adicionar Outra Despesa</button>`;
         },
         renderList(listType) {
             const listContainer = document.querySelector(`.planning-list[data-list-type="${listType}"]`);
@@ -605,31 +611,30 @@ document.addEventListener('DOMContentLoaded', () => {
         handleViewContainerClick(e) {
             const actionTarget = e.target.closest('[data-action]');
             
-            // << MUDANÇA 2: Lógica de clique na lista de movimentações
             if (!actionTarget) {
                 const activeMenu = document.querySelector('.card-actions-menu:not(.hidden)');
                 if (activeMenu && !e.target.closest('.card-actions-button')) {
                     activeMenu.classList.add('hidden');
                 }
                 
-                // Verifica se o clique foi em um item da lista, mas não no botão de lixeira
                 const transactionItem = e.target.closest('.transaction-list-item');
                 if (transactionItem && !e.target.closest('.delete-btn')) {
                     const transactionId = transactionItem.dataset.id;
                     const transaction = this.state.allTransactions.find(t => t.id === transactionId);
                     if (transaction) {
-                         this.showTransactionDetailsModal(transaction); // Chama o novo modal de detalhes
+                         this.showTransactionDetailsModal(transaction);
                     }
                 }
                 return;
             }
 
             const { action, id, type, index, cardId, chart } = actionTarget.dataset;
+            
             const actionHandlers = {
                 'show-lancar-form': () => this.renderLancamentoForm(actionTarget.dataset.formType),
                 'cancel-lancar-form': () => {
                     document.getElementById('form-lancamento-container').innerHTML = '';
-                    this.state.lancamentoFormState = null; 
+                    sessionStorage.removeItem('lancamentoFormState');
                 },
                 'change-chart-type': () => { this.state.dashboardChartType = chart; this.renderCurrentView(); },
                 'add-account': () => this.showAccountModal(),
@@ -643,9 +648,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 'delete-planning-item': () => this.deletePlanningItem(type, parseInt(index)),
                 'sync-invoice': () => this.syncInvoiceValue(parseInt(index), cardId),
                 'delete-transaction': () => { const transaction = this.state.allTransactions.find(t => t.id === id); this.deleteItem('financeiro_lancamentos', id, 'Lançamento', transaction); },
-                'edit-from-details': () => { // << NOVO: Ação para o botão editar do modal de detalhes
-                    this.closeModal();
-                    setTimeout(() => this.showTransactionModal(id), 200); // Pequeno timeout para transição suave
+                'edit-from-details': () => {
+                    this.showTransactionModal(id);
                 },
                 'show-filter-modal': () => this.showFilterModal(),
                 'show-sort-modal': () => this.showSortModal(),
@@ -654,21 +658,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 'add-person': () => this.showPersonModal(), 'edit-person': () => this.showPersonModal(id), 'delete-person': () => this.deleteItem('financeiro_pessoas', id, 'Pessoa'),
                 'add-establishment': () => this.showEstablishmentModal(), 'edit-establishment': () => this.showEstablishmentModal(id), 'delete-establishment': () => this.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
             };
+
             if (actionHandlers[action]) {
-                actionHandlers[action]();
+                actionHandlers[action](e);
             }
         },
 
         handleFormSubmit(e) {
             e.preventDefault();
             const form = e.target.closest('form');
-            if (!form) {
-                console.error("Handler de submit não encontrou um formulário.");
-                return;
-            }
+            if (!form) return;
 
             const formId = form.getAttribute('id');
-            console.log(`Submissão de formulário detectada: #${formId}`);
             const formHandlers = {
                 'account-form': () => this.saveItem(e, 'financeiro_contas', 'Conta'),
                 'category-form': () => this.saveItem(e, 'financeiro_categorias', 'Categoria'),
@@ -693,21 +694,27 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             if (formHandlers[formId]) {
                 formHandlers[formId]();
-            } else {
-                console.warn(`Nenhum handler de submit encontrado para o formulário com id: ${formId}`);
             }
         },
 
         handleStateUpdateOnInput(e) {
-            const input = e.target.closest('.planning-input');
-            if (input && !input.readOnly && this.state.currentView === 'planning') {
-                const { type, index, field } = input.dataset;
-                const value = input.type === 'number' ? input.value : input.value;
-                if (input.type === 'number' && isNaN(parseFloat(value)) && value !== '' && value !== '-') return;
+            const planningInput = e.target.closest('.planning-input');
+            if (planningInput && !planningInput.readOnly && this.state.currentView === 'planning') {
+                const { type, index, field } = planningInput.dataset;
+                const value = planningInput.type === 'number' ? planningInput.value : planningInput.value;
+                if (planningInput.type === 'number' && isNaN(parseFloat(value)) && value !== '' && value !== '-') return;
                 this.state.planningData[type][parseInt(index)][field] = value;
                 this.updateSummary();
                 this.debouncedSavePlanning();
                 return;
+            }
+            const lancarInput = e.target.closest('#lancar-form input, #lancar-form select');
+            if (lancarInput) {
+                const form = lancarInput.closest('form');
+                const formData = new FormData(form);
+                const formState = Object.fromEntries(formData.entries());
+                formState.formType = form.dataset.type;
+                sessionStorage.setItem('lancamentoFormState', JSON.stringify(formState));
             }
         },
         handleSaveOnChange(e) {
@@ -720,10 +727,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.savePlanningData();
                     const planningItem = checkbox.closest('.planning-item');
                     planningItem.classList.toggle('paid', checkbox.checked);
-                    const inputFields = planningItem.querySelectorAll('.planning-input');
-                    inputFields.forEach(input => {
-                        input.style.textDecoration = checkbox.checked ? 'line-through' : 'none';
-                    });
                     this.updateSummary();
                 }
                 return;
@@ -740,6 +743,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!transaction || !transaction.id) return '';
             const category = this.state.categories.find(c => c && c.id === transaction.categoryId);
             const account = this.state.accounts.find(a => a && a.id === transaction.accountId);
+            
+            const primaryText = transaction.establishmentId ? this.findItemName(transaction.establishmentId, 'establishments') : transaction.description;
+            const secondaryText = showAccount && account ? account.name : category?.name || transaction.type;
+
             let isPositive = transaction.type === 'Entrada';
             let amountClass = isPositive ? 'positive' : 'negative';
             let amountSign = isPositive ? '+' : '-';
@@ -750,9 +757,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const date = this.getDateObject(transaction.date);
             const formattedDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
             const formattedTime = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+            
             return `<div class="transaction-list-item" data-id="${transaction.id}">
             <div class="icon" style="background-color: ${account?.color || '#e5e5ea'}"><i class="fa-solid ${category?.icon || (isPositive ? 'fa-arrow-up' : 'fa-arrow-down')}"></i></div>
-            <div class="details"><div class="description">${transaction.description}</div><div class="category">${category?.name || transaction.type} ${showAccount && account ? `• ${account.name}` : ''}</div></div>
+            <div class="details"><div class="description">${primaryText}</div><div class="category">${secondaryText}</div></div>
             <div class="amount-details"><div class="amount ${amountClass}">${amountSign} ${this.formatCurrency(transaction.value)}</div><div class="date">${formattedDate} - ${formattedTime}</div></div>
             <div class="actions"><button class="button-icon delete-btn" data-action="delete-transaction" data-id="${transaction.id}" title="Excluir"><i class="fa-solid fa-trash"></i></button></div>
             </div>`;
@@ -788,9 +796,25 @@ document.addEventListener('DOMContentLoaded', () => {
                     break;
             }
             container.innerHTML = `<div class="card"><form id="lancar-form" data-type="${type}" novalidate><h3 class="card-title" style="font-size: 20px;">${title}</h3>${formHtml}<div class="form-actions"><button type="button" class="button-secondary" data-action="cancel-lancar-form">Cancelar</button><button type="submit" class="button-primary"><i class="fa-solid fa-check"></i> Salvar</button></div></form></div>`;
+            
+            const form = container.querySelector('#lancar-form');
+            form.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+                    e.preventDefault();
+                    const fields = Array.from(form.querySelectorAll('input, select'));
+                    const currentIndex = fields.indexOf(e.target);
+                    const nextField = fields[currentIndex + 1];
+                    if (nextField) {
+                        nextField.focus();
+                    } else {
+                        form.querySelector('button[type="submit"]').click();
+                    }
+                }
+            });
+
             setTimeout(() => {
                 const mainContent = document.querySelector('.main-content');
-                if (container && mainContent) {
+                if (container && mainContent && container.offsetParent) {
                     const headerHeight = document.querySelector('.main-header')?.offsetHeight || 80;
                     const targetPosition = container.offsetTop - headerHeight - 20;
                     mainContent.scrollTo({
@@ -801,9 +825,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 100);
         },
         async saveTransaction(form, isEdit = false) {
-            const type = isEdit ? this.state.allTransactions.find(t => t.id === (new FormData(form)).get('id'))?.type : form.dataset.type;
             const formData = new FormData(form);
             const data = Object.fromEntries(formData.entries());
+            const type = isEdit ? this.state.allTransactions.find(t => t.id === data.id)?.type : form.dataset.type;
             const id = data.id;
             const submitButton = form.querySelector('[type="submit"]');
             submitButton.disabled = true;
@@ -836,13 +860,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     batch.set(this.db.collection('financeiro_lancamentos').doc(), credit);
                     this.updateAccountBalance(data.sourceAccountId, data.value, 'Saída', false, batch);
                 } else if (isEdit) {
-                    const fullDate = new Date(`${dateString}T${new Date().toTimeString().slice(0, 8)}`);
-                    const updateData = { ...data, value: data.value, date: firebase.firestore.Timestamp.fromDate(fullDate), monthYear: `${(fullDate.getMonth() + 1).toString().padStart(2, '0')}-${fullDate.getFullYear()}` };
-                    delete updateData.id;
                     const originalTransaction = this.state.allTransactions.find(t => t.id === id);
+                    if (!originalTransaction) throw new Error("Lançamento original não encontrado para editar.");
+                    
+                    const fullDate = new Date(`${dateString}T${this.getDateObject(originalTransaction.date).toTimeString().slice(0, 8)}`);
+                    const updateData = { ...data, value: data.value, date: firebase.firestore.Timestamp.fromDate(fullDate), monthYear: `${(fullDate.getMonth() + 1).toString().padStart(2, '0')}-${fullDate.getFullYear()}`, type: originalTransaction.type };
+                    delete updateData.id;
+                    
                     batch.update(this.db.collection('financeiro_lancamentos').doc(id), updateData);
+                    
                     this.updateAccountBalance(originalTransaction.accountId, originalTransaction.value, originalTransaction.type, true, batch);
                     this.updateAccountBalance(updateData.accountId, updateData.value, originalTransaction.type, false, batch);
+
                 } else {
                     const installments = parseInt(data.installments) || 1;
                     const selectedAccount = this.state.accounts.find(a => a.id === data.accountId);
@@ -871,12 +900,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!isEdit) {
                     document.getElementById('form-lancamento-container').innerHTML = '';
+                    sessionStorage.removeItem('lancamentoFormState');
                 } else {
                     this.closeModal();
                 }
 
                 this.showToast('Lançamento salvo com sucesso!', 'success');
-                this.state.lancamentoFormState = null; 
 
             } catch (error) {
                 console.error("Erro ao salvar lançamento:", error);
@@ -884,7 +913,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } finally {
                 if (submitButton) {
                     submitButton.disabled = false;
-                    submitButton.innerHTML = `<i class="fa-solid fa-check"></i> Salvar`;
+                    submitButton.innerHTML = isEdit ? `Salvar` : `<i class="fa-solid fa-check"></i> Salvar`;
                 }
             }
         },
@@ -954,9 +983,8 @@ document.addEventListener('DOMContentLoaded', () => {
                         transactionsToDelete.push(transactionToDelete);
                     }
                     
-                    // << CORREÇÃO 1: Adiciona verificação para garantir que a transação foi encontrada
-                    if (transactionsToDelete.length === 0) {
-                        throw new Error("Lançamento não encontrado para exclusão.");
+                    if (transactionsToDelete.length === 0 && transactionToDelete) {
+                         transactionsToDelete.push(transactionToDelete);
                     }
 
                     for (const trans of transactionsToDelete) {
@@ -995,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <input type="hidden" name="id" value="${account?.id || ''}">
             <div class="modal-header">
             <h2>${isEditing ? 'Editar' : 'Nova'} Conta</h2>
-            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
             </div>
             <div class="modal-body">
             <div class="form-group">
@@ -1103,7 +1131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         showCategoryModal(categoryId = null) {
             const category = categoryId ? this.state.categories.find(c => c.id === categoryId) : {};
-            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category?.id ? 'Editar' : 'Nova'} Categoria</h2><button class="close-modal-btn" type="button"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="category-form" class="button-primary">Salvar</button></div></form></div>`;
+            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category?.id ? 'Editar' : 'Nova'} Categoria</h2><button class="button-secondary close-modal-btn" type="button"><i class="fa-solid fa-times"></i> Fechar</button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="category-form" class="button-primary">Salvar</button></div></form></div>`;
             this.setupModalEvents();
         },
         showPersonModal(personId = null) {
@@ -1117,9 +1145,8 @@ document.addEventListener('DOMContentLoaded', () => {
             this.setupModalEvents();
         },
         getGenericModalHtml(formId, title, item = {}, fields = []) {
-            return `<div class="modal-content"><form id="${formId}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button class="close-modal-btn" type="button"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="${formId}" class="button-primary">Salvar</button></div></form></div>`;
+            return `<div class="modal-content"><form id="${formId}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button class="button-secondary close-modal-btn" type="button"><i class="fa-solid fa-times"></i> Fechar</button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="${formId}" class="button-primary">Salvar</button></div></form></div>`;
         },
-        // << MUDANÇA 2: Nova função para o modal de detalhes >>
         showTransactionDetailsModal(transaction) {
             if (!transaction) return;
 
@@ -1135,14 +1162,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const personName = transaction.personId ? this.findItemName(transaction.personId, 'people') : null;
             const establishmentName = transaction.establishmentId ? this.findItemName(transaction.establishmentId, 'establishments') : null;
 
-            // Define se os botões de editar/excluir devem aparecer
             const canBeModified = !transaction.paymentId && !transaction.installmentGroupId && transaction.type !== 'Pagamento de Fatura' && transaction.type !== 'Transferência';
 
             const modalHtml = `
             <div class="modal-content">
                 <div class="modal-header">
                     <h2>Detalhes da Movimentação</h2>
-                    <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+                    <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
                 </div>
                 <div class="modal-body">
                     <div class="transaction-detail-header">
@@ -1158,9 +1184,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 </div>
                 <div class="modal-actions">
-                    ${canBeModified ? `<button type="button" class="button-secondary delete-btn" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button>` : ''}
-                    ${canBeModified ? `<button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>` : ''}
                     <button type="button" class="button-secondary close-modal-btn">Fechar</button>
+                    ${canBeModified ? `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button>` : ''}
+                    ${canBeModified ? `<button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>` : ''}
                 </div>
             </div>`;
 
@@ -1173,24 +1199,53 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.showToast("Este tipo de lançamento não pode ser editado.", "error");
                 return;
             }
-            this.elements.modalContainer.innerHTML = `<div class="modal-content"><div class="modal-header"><h2>Editar Lançamento</h2><butt</div><div class="modal-body"><form id="transaction-form" novalidate><input type="hidden" name="id" value="${transaction.id}"><div class="form-group"><label>Tipo</label><input type="text" value="${transaction.type}" disabled></div><div id="transaction-fields-container"></div></form></div><div class="modal-actions"><button type="button" class="button-secondary" data-action="delete-transaction" data-id="${transaction.id}">Excluir</button><button type="submit" form="transaction-form" class="button-primary">Salvar</button></div></div>`;
-            this.renderTransactionFormFields_old(transaction);
+            const getOptions = (items = [], selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
+            const dateInputValue = transaction.date ? this.getLocalISODate(this.getDateObject(transaction.date)) : this.getLocalISODate();
+            let formFieldsHtml = `
+                <div class="form-group"><label>Descrição</label><input type="text" name="description" value="${transaction.description || ''}" required></div>
+                <div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" value="${transaction.value || ''}" required></div></div>
+                <div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div>
+                <div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(this.state.accounts.filter(a => !a.arquivado), transaction.accountId)}</select></div>
+                <div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(this.state.categories, transaction.categoryId)}</select></div>
+            `;
+            if (transaction.type === 'Saída') {
+                formFieldsHtml += `
+                    <div class="form-group"><label>Pessoa (Opcional)</label><select name="personId"><option value="">Nenhuma</option>${getOptions(this.state.people, transaction.personId)}</select></div>
+                    <div class="form-group"><label>Estabelecimento (Opcional)</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(this.state.establishments, transaction.establishmentId)}</select></div>
+                `;
+            }
+            this.elements.modalContainer.innerHTML = `
+                <div class="modal-content">
+                    <form id="transaction-form" novalidate>
+                        <input type="hidden" name="id" value="${transaction.id}">
+                        <div class="modal-header">
+                            <h2>Editar Lançamento</h2>
+                            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+                        </div>
+                        <div class="modal-body">${formFieldsHtml}</div>
+                        <div class="modal-actions">
+                            <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                            <button type="submit" form="transaction-form" class="button-primary">Salvar</button>
+                        </div>
+                    </form>
+                </div>`;
             this.setupModalEvents();
         },
-        renderTransactionFormFields_old(data = {}) {
-            const container = document.getElementById('transaction-fields-container');
-            const getOptions = (items = [], selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
-            const dateInputValue = data.date ? this.getLocalISODate(this.getDateObject(data.date)) : this.getLocalISODate();
-            container.innerHTML = `<div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" value="${data.value || ''}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Descrição</label><input type="text" name="description" value="${data.description || ''}" required></div><div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(this.state.accounts.filter(a => !a.arquivado), data.accountId)}</select></div><div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(this.state.categories, data.categoryId)}</select></div><div class="form-group"><label>Pessoa</label><select name="personId"><option value="">Nenhuma</option>${getOptions(this.state.people, data.personId)}</select></div><div class="form-group"><label>Estabelecimento</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(this.state.establishments, data.establishmentId)}</select></div>`;
-        },
         setupModalEvents() {
+            if (this.closeModalTimeout) {
+                clearTimeout(this.closeModalTimeout);
+                this.closeModalTimeout = null;
+            }
             this.elements.modalContainer.classList.add('visible');
             this.elements.modalContainer.querySelectorAll('.close-modal-btn').forEach(btn => btn.onclick = () => this.closeModal());
             this.elements.modalContainer.onclick = (e) => { if (e.target === this.elements.modalContainer) this.closeModal(); };
         },
         closeModal() {
             this.elements.modalContainer.classList.remove('visible');
-            this.elements.modalContainer.innerHTML = '';
+            this.closeModalTimeout = setTimeout(() => {
+                this.elements.modalContainer.innerHTML = '';
+                this.closeModalTimeout = null;
+            }, 300);
         },
         createDashboardChart(transactions) {
             const ctx = document.getElementById('dashboard-chart');
@@ -1274,11 +1329,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     return `<option value="${p}" ${p === initialPeriod ? 'selected' : ''}>${monthName} de ${year}</option>`;
                 }).join('');
                 const currentPeriodKey = periodSelector.value;
-                if (!currentPeriodKey || !transactionsByInvoice[currentPeriodKey]) {
-                    detailsContainer.innerHTML = '<div class="empty-state"><i class="fa-solid fa-ghost"></i><p>Nenhuma despesa nesta fatura.</p></div>';
+                if (!currentPeriodKey) {
+                    detailsContainer.innerHTML = '<div class="empty-state"><i class="fa-solid fa-ghost"></i><p>Nenhuma fatura para este período.</p></div>';
                     return;
                 }
-                const transactionsForPeriod = transactionsByInvoice[currentPeriodKey];
+                const transactionsForPeriod = transactionsByInvoice[currentPeriodKey] || [];
                 transactionsForPeriod.sort((a, b) => this.getDateObject(b.date) - this.getDateObject(a.date));
                 const invoiceTotal = transactionsForPeriod.reduce((sum, t) => sum + t.value, 0);
                 const isPaid = this.isInvoicePaid(cardId, currentPeriodKey);
@@ -1360,7 +1415,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="modal-content">
             <div class="modal-header">
             <h2>Detalhes da Compra Parcelada</h2>
-            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
             </div>
             <div class="modal-body">
             <h4>${originalDescription}</h4>
@@ -1385,7 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <form id="filter-form">
             <div class="modal-header">
             <h2>Filtrar Movimentações</h2>
-            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
             </div>
             <div class="modal-body">
             <div class="form-group">
@@ -1418,7 +1473,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <form id="sort-form">
             <div class="modal-header">
             <h2>Ordenar Movimentações</h2>
-            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
             </div>
             <div class="modal-body">
             <div class="form-group radio-group">
