@@ -1023,7 +1023,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <input type="hidden" name="id" value="${account?.id || ''}">
             <div class="modal-header">
             <h2>${isEditing ? 'Editar' : 'Nova'} Conta</h2>
-            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
             <div class="form-group">
@@ -1131,7 +1131,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         showCategoryModal(categoryId = null) {
             const category = categoryId ? this.state.categories.find(c => c.id === categoryId) : {};
-            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category?.id ? 'Editar' : 'Nova'} Categoria</h2><button class="button-secondary close-modal-btn" type="button"><i class="fa-solid fa-times"></i> Fechar</button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="category-form" class="button-primary">Salvar</button></div></form></div>`;
+            this.elements.modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category?.id ? 'Editar' : 'Nova'} Categoria</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="category-form" class="button-primary">Salvar</button></div></form></div>`;
             this.setupModalEvents();
         },
         showPersonModal(personId = null) {
@@ -1145,7 +1145,7 @@ document.addEventListener('DOMContentLoaded', () => {
             this.setupModalEvents();
         },
         getGenericModalHtml(formId, title, item = {}, fields = []) {
-            return `<div class="modal-content"><form id="${formId}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button class="button-secondary close-modal-btn" type="button"><i class="fa-solid fa-times"></i> Fechar</button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="${formId}" class="button-primary">Salvar</button></div></form></div>`;
+            return `<div class="modal-content"><form id="${formId}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="${formId}" class="button-primary">Salvar</button></div></form></div>`;
         },
         showTransactionDetailsModal(transaction) {
             if (!transaction) return;
@@ -1168,7 +1168,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="modal-content">
                 <div class="modal-header">
                     <h2>Detalhes da Movimentação</h2>
-                    <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+                    <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
                 </div>
                 <div class="modal-body">
                     <div class="transaction-detail-header">
@@ -1220,7 +1220,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <input type="hidden" name="id" value="${transaction.id}">
                         <div class="modal-header">
                             <h2>Editar Lançamento</h2>
-                            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+                            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
                         </div>
                         <div class="modal-body">${formFieldsHtml}</div>
                         <div class="modal-actions">
@@ -1415,7 +1415,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="modal-content">
             <div class="modal-header">
             <h2>Detalhes da Compra Parcelada</h2>
-            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
             <h4>${originalDescription}</h4>
@@ -1440,7 +1440,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <form id="filter-form">
             <div class="modal-header">
             <h2>Filtrar Movimentações</h2>
-            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
             <div class="form-group">
@@ -1473,7 +1473,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <form id="sort-form">
             <div class="modal-header">
             <h2>Ordenar Movimentações</h2>
-            <button type="button" class="button-secondary close-modal-btn"><i class="fa-solid fa-times"></i> Fechar</button>
+            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
             <div class="form-group radio-group">
