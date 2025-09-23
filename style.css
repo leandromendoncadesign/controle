@@ -489,7 +489,7 @@ body.is-loading {
     gap: 16px;
     padding: 12px 0;
     border-bottom: 1px solid var(--separator-color);
-    cursor: pointer; /* Adicionado para indicar que é clicável */
+    cursor: pointer;
     transition: background-color 0.2s ease;
 }
 .transaction-list-item:hover {
@@ -546,6 +546,9 @@ body.is-loading {
 .detail-row .label {
     font-weight: 500;
     color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 .detail-row .value {
     font-weight: 500;
@@ -572,7 +575,7 @@ body.is-loading {
 
 
 /* ====================================================================== */
-/* ESTILOS PARA A TELA DE PLANEJAMENTO */
+/* TELA DE PLANEJAMENTO */
 /* ====================================================================== */
 .planning-section {
     margin-bottom: 32px;
@@ -617,23 +620,6 @@ body.is-loading {
 .section-icon.expenses-icon {
     background-color: rgba(255, 59, 48, 0.1);
     color: var(--accent-red);
-}
-.button-add {
-    background-color: var(--accent-blue);
-    color: white;
-    border: none;
-    border-radius: var(--radius-m);
-    padding: 10px 16px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-}
-.button-add:hover {
-    background-color: #006ee6;
 }
 .planning-list {
     display: flex;
@@ -833,7 +819,7 @@ body.is-loading {
 }
 .modal-actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: center;
     gap: 12px;
     padding: 20px 24px;
     border-top: 1px solid var(--separator-color);
@@ -844,49 +830,10 @@ body.is-loading {
     flex-shrink: 0;
 }
 .close-modal-btn {
-    background: transparent;
-    border: none;
-    font-size: 16px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
+    /* Herda todos os estilos de button-secondary */
+    /* Mantemos apenas as propriedades específicas de posicionamento quando necessário */
 }
-.close-modal-btn:hover {
-    background-color: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-.button-primary {
-    background-color: var(--accent-blue);
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: var(--radius-s);
-    cursor: pointer;
-    font-weight: 500;
-    font-size: 15px;
-    min-width: 100px;
-    text-align: center;
-    justify-content: center;
-}
-.button-secondary {
-    background-color: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--separator-color);
-    padding: 10px 20px;
-    border-radius: var(--radius-s);
-    cursor: pointer;
-    font-weight: 500;
-    font-size: 15px;
-    min-width: 100px;
-    text-align: center;
-    justify-content: center;
-}
+
 #toast-container {
     position: fixed;
     bottom: 20px;
@@ -916,7 +863,6 @@ body.is-loading {
 .toast.success { background-color: var(--accent-green); }
 .toast.error { background-color: var(--accent-red); }
 
-/* Detalhes da transação no Modal */
 .transaction-detail-header {
     text-align: center;
     padding-bottom: 16px;
@@ -934,10 +880,9 @@ body.is-loading {
 }
 
 /* ====================================================================== */
-/* RESPONSIVIDADE - A MÁGICA PARA CELULARES ACONTECE AQUI */
+/* RESPONSIVIDADE */
 /* ====================================================================== */
 @media (max-width: 768px) {
-    /* --- 1. LAYOUT GERAL --- */
     .sidebar {
         display: none;
     }
@@ -988,7 +933,6 @@ body.is-loading {
         width: auto;
     }
 
-    /* --- 2. AJUSTE DE TIPOGRAFIA --- */
     .view-header h2 {
         font-size: 24px;
     }
@@ -999,7 +943,6 @@ body.is-loading {
         font-size: 28px;
     }
 
-    /* --- 3. SIMPLIFICAÇÃO DE COMPONENTES COMPLEXOS --- */
     .card-grid {
         grid-template-columns: 1fr;
     }
@@ -1048,9 +991,7 @@ body.is-loading {
     .planning-input-value { grid-area: value; padding-left: 0 !important; }
     .planning-item-actions { grid-area: actions; }
     
-    /* --- AJUSTE PARA EXIBIR O BOTÃO SYNC NO MOBILE --- */
     .planning-item.expense-item {
-        /* Adicionamos uma coluna extra para o botão de sync */
         grid-template-columns: auto 1fr auto auto; 
         grid-template-areas:
             "check description sync actions"
@@ -1058,18 +999,23 @@ body.is-loading {
     }
 
     .planning-item .sync-btn {
-        grid-area: sync; /* Posiciona o botão na nova área 'sync' */
-        place-self: center; /* Centraliza o botão em seu espaço */
-        width: 32px; /* Tamanho um pouco menor para caber bem */
+        grid-area: sync;
+        place-self: center;
+        width: 32px;
         height: 32px;
         font-size: 13px;
     }
 
-
-    /* --- 4. OTIMIZAÇÃO DE MODAIS --- */
     .modal-content {
         width: 95%;
         max-height: 85vh;
+    }
+    
+    .modal-header {
+        text-align: center;
+    }
+    .modal-header h2 {
+        flex-grow: 1;
     }
 
     .modal-body {
@@ -1088,7 +1034,6 @@ body.is-loading {
     }
 }
 
-/* Esconde a navegação mobile em telas maiores */
 @media (min-width: 769px) {
     .mobile-nav {
         display: none;
@@ -1096,23 +1041,53 @@ body.is-loading {
 }
 
 /* ====================================================================== */
-/* ESTILOS ADICIONAIS DE BOTÕES (VERSÃO MAIS FORTE) */
+/* BOTÕES PADRONIZADOS - ATUALIZADO */
 /* ====================================================================== */
-.modal-actions .button-danger {
-    background-color: var(--accent-red) !important;
-    color: white !important;
-    border: none !important;
+.button-primary, .button-secondary, .button-danger {
     padding: 10px 20px;
     border-radius: var(--radius-s);
     cursor: pointer;
     font-weight: 500;
     font-size: 15px;
     min-width: 100px;
+    min-height: 40px; /* Nova propriedade para altura mínima */
     text-align: center;
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    transition: background-color 0.2s ease;
+    gap: 8px;
+    transition: all 0.2s ease;
+    border: 1px solid transparent;
+    box-sizing: border-box; /* Garante que padding e border sejam incluídos no tamanho */
 }
 
-.modal-actions .button-danger:hover {
-    background-color: #d12c23 !important; /* Um tom de vermelho um pouco mais escuro */
+.button-primary {
+    background-color: var(--accent-blue);
+    border-color: var(--accent-blue);
+    color: white;
+}
+.button-primary:hover {
+    background-color: #006ee6;
+    border-color: #006ee6;
+}
+
+.button-secondary {
+    background-color: transparent;
+    color: var(--text-secondary);
+    border-color: var(--separator-color);
+}
+.button-secondary:hover {
+    background-color: var(--bg-tertiary);
+    border-color: var(--text-secondary);
+    color: var(--text-primary);
+}
+
+.button-danger {
+    background-color: var(--accent-red);
+    border-color: var(--accent-red);
+    color: white;
+}
+.button-danger:hover {
+    background-color: #d12c23;
+    border-color: #d12c23;
 }
