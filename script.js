@@ -18,6 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
             movementsSort: { key: 'date', order: 'desc' },
             movementsFilter: { type: 'all', accountId: 'all' },
             showArchived: false,
+            currentReport: null,
         },
         config: {
             firebase: { apiKey: "AIzaSyBbJnhZuL5f9v7KYjJRa1uGY9g17JXkYlo", authDomain: "dadosnf-38b2f.firebaseapp.com", projectId: "dadosnf-38b2f", storageBucket: "dadosnf-38b2f.firebasestorage.app", messagingSenderId: "103044936313", appId: "1:103044936313:web:e0f1ad680cd31445a1daa8" }
@@ -85,6 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const startApp = () => {
                 this.elements.authContainer.style.display = 'none';
+                this.applySavedSettings(); // Aplica as configurações salvas
                 this.elements.appRoot.classList.add('is-visible');
                 this.elements.body.classList.remove('is-loading');
                 this.attachEventListeners();
@@ -287,6 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (this.state.currentView === 'resumos') {
                 const transactionsThisMonth = this.state.allTransactions.filter(t => t.monthYear === this.state.currentMonthYear);
                 this.createDashboardChart(transactionsThisMonth);
+                this.setupReportGenerator();
             }
             if (this.state.currentView === 'invoices') {
                 this.postRenderInvoices();
@@ -301,6 +304,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     this.renderLancamentoForm(formType, prefillData);
                     sessionStorage.removeItem('lancamentoFormState');
                 }
+            }
+            if (this.state.currentView === 'settings') {
+                this.setupAppearanceSettings();
             }
         },
 
@@ -323,13 +329,46 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="card kpi-card"><div class="value negative">- ${this.formatCurrency(totalExpense)}</div><div class="label">Saídas do Mês</div></div>
             </div>
             <div class="card">
-            <h3 class="card-title"><i class="fa-solid fa-chart-bar"></i> Saídas Agrupadas por:</h3>
+            <h3 class="card-title"><i class="fa-solid fa-chart-bar"></i> Saídas do Mês Agrupadas por:</h3>
             <div class="chart-selector">
             <button data-action="change-chart-type" data-chart="category" class="${this.state.dashboardChartType === 'category' ? 'active' : ''}">Categoria</button>
             <button data-action="change-chart-type" data-chart="establishment" class="${this.state.dashboardChartType === 'establishment' ? 'active' : ''}">Estabelecimento</button>
             <button data-action="change-chart-type" data-chart="person" class="${this.state.dashboardChartType === 'person' ? 'active' : ''}">Pessoa</button>
             </div>
             <div style="height: 300px;"><canvas id="dashboard-chart"></canvas></div>
+            </div>
+            <div class="card" style="margin-top: 24px;">
+                <h3 class="card-title"><i class="fa-solid fa-magnifying-glass-chart"></i> Central de Relatórios</h3>
+                <div id="report-generator">
+                    <div class="grid-container" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <div class="form-group">
+                            <label>1. Tipo de Relatório</label>
+                            <select id="report-type-selector">
+                                <option value="category">Saídas por Categoria</option>
+                                <option value="person">Transações por Pessoa</option>
+                                <option value="establishment">Transações por Estabelecimento</option>
+                                <option value="account">Transações por Conta/Cartão</option>
+                                <option value="keyword">Busca por Palavra-Chave</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="report-item-container">
+                            <label>2. Selecione o Item</label>
+                            <select id="report-item-selector"></select>
+                            <input type="text" id="report-keyword-input" class="hidden" placeholder="Digite aqui...">
+                        </div>
+                        <div class="form-group">
+                            <label>3. Período (De)</label>
+                            <input type="date" id="report-date-start">
+                        </div>
+                        <div class="form-group">
+                            <label>4. Período (Até)</label>
+                            <input type="date" id="report-date-end">
+                        </div>
+                    </div>
+                    <div class="form-actions" style="margin-top: 0;">
+                        <button id="generate-report-btn" class="button-primary"><i class="fa-solid fa-play"></i> Gerar Relatório</button>
+                    </div>
+                </div>
             </div>`;
         },
         getLancarHtml() {
@@ -403,6 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!items || items.length === 0) return `<div class="empty-state" style="padding: 20px 0;">Nenhum item cadastrado.</div>`;
                 return items
                     .filter(item => !!item)
+                    .sort((a, b) => a.name.localeCompare(b.name))
                     .map(item => `
                     <div class="item-list-row">
                     <span class="icon-name"><i class="fa-solid ${item.icon || icon}"></i> ${item.name}</span>
@@ -415,9 +455,44 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
             <div class="view-header"><h2><i class="fa-solid fa-gears"></i> Configurações</h2></div>
             <div class="card">
-            <div class="settings-section"><div class="settings-section-header"><h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-tags"></i> Categorias</h3><button class="button-primary" data-action="add-category"><i class="fa-solid fa-plus"></i> Adicionar</button></div><div id="categories-list">${getItemsHtml(this.state.categories, 'category', 'fa-tag')}</div></div>
-            <div class="settings-section"><div class="settings-section-header"><h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-users"></i> Pessoas/Terceiros</h3><button class="button-primary" data-action="add-person"><i class="fa-solid fa-plus"></i> Adicionar</button></div><div id="people-list">${getItemsHtml(this.state.people, 'person', 'fa-user')}</div></div>
-            <div class="settings-section"><div class="settings-section-header"><h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-store"></i> Estabelecimentos</h3><button class="button-primary" data-action="add-establishment"><i class="fa-solid fa-plus"></i> Adicionar</button></div><div id="establishments-list">${getItemsHtml(this.state.establishments, 'establishment', 'fa-store')}</div></div>
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-tags"></i> Categorias</h3>
+                        <button class="button-primary" data-action="add-category"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                    </div>
+                    <div id="categories-list">${getItemsHtml(this.state.categories, 'category', 'fa-tag')}</div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-users"></i> Pessoas/Terceiros</h3>
+                        <button class="button-primary" data-action="add-person"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                    </div>
+                    <div id="people-list">${getItemsHtml(this.state.people, 'person', 'fa-user')}</div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-store"></i> Estabelecimentos</h3>
+                        <button class="button-primary" data-action="add-establishment"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                    </div>
+                    <div id="establishments-list">${getItemsHtml(this.state.establishments, 'establishment', 'fa-store')}</div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-palette"></i> Aparência</h3>
+                    </div>
+                    <div class="form-group">
+                        <label for="font-size-slider">Tamanho da Fonte</label>
+                        <input type="range" id="font-size-slider" min="14" max="20" step="1" style="width: 100%; cursor: pointer;">
+                    </div>
+                    <div class="form-group">
+                        <label for="animation-style-selector">Estilo de Animação</label>
+                        <select id="animation-style-selector">
+                            <option value="sutil">Sutil (Padrão)</option>
+                            <option value="fluida">Fluida</option>
+                            <option value="instantanea">Instantânea (Sem Animações)</option>
+                        </select>
+                    </div>
+                </div>
             </div>`;
         },
         getAccountsHtml() {
@@ -454,21 +529,21 @@ document.addEventListener('DOMContentLoaded', () => {
             return `
             <div class="account-card-display ${account.arquivado ? 'archived' : ''}" style="background-color: ${account.color || '#424242'}; color: ${textColor};">
             <div class="card-content">
-            <div class="card-header">
-            <div class="icon-title"><i class="fa-solid ${icon}"></i><span>${account.name || 'Sem nome'}</span></div>
-            <button class="card-actions-button" data-action="toggle-menu" data-id="${account.id}"><i class="fa-solid fa-ellipsis-vertical"></i></button>
-            <ul class="card-actions-menu hidden" data-menu-id="${account.id}">
-            ${account.type === 'Conta Corrente' ? `<li data-action="adjust-balance" data-id="${account.id}"><i class="fa-solid fa-sack-dollar"></i> Ajustar Saldo</li>` : ''}
-            <li data-action="edit-account" data-id="${account.id}"><i class="fa-solid fa-pencil"></i> Editar</li>
-            <li data-action="archive-account" data-id="${account.id}"><i class="fa-solid fa-archive"></i> ${account.arquivado ? 'Desarquivar' : 'Arquivar'}</li>
-            <li data-action="delete-account" data-id="${account.id}" class="delete"><i class="fa-solid fa-trash-can"></i> Excluir</li>
-            </ul>
-            </div>
-            <div class="card-body">
-            <div class="label">${mainLabel}</div>
-            <div class="main-value">${mainValue}</div>
-            </div>
-            ${footerInfo}
+                <div class="card-header">
+                <div class="icon-title"><i class="fa-solid ${icon}"></i><span>${account.name || 'Sem nome'}</span></div>
+                <button class="card-actions-button" data-action="toggle-menu" data-id="${account.id}"><i class="fa-solid fa-ellipsis-vertical"></i></button>
+                <ul class="card-actions-menu hidden" data-menu-id="${account.id}">
+                ${account.type === 'Conta Corrente' ? `<li data-action="adjust-balance" data-id="${account.id}"><i class="fa-solid fa-sack-dollar"></i> Ajustar Saldo</li>` : ''}
+                <li data-action="edit-account" data-id="${account.id}"><i class="fa-solid fa-pencil"></i> Editar</li>
+                <li data-action="archive-account" data-id="${account.id}"><i class="fa-solid fa-archive"></i> ${account.arquivado ? 'Desarquivar' : 'Arquivar'}</li>
+                <li data-action="delete-account" data-id="${account.id}" class="delete"><i class="fa-solid fa-trash-can"></i> Excluir</li>
+                </ul>
+                </div>
+                <div class="card-body">
+                <div class="label">${mainLabel}</div>
+                <div class="main-value">${mainValue}</div>
+                </div>
+                ${footerInfo}
             </div>
             </div>`;
         },
@@ -638,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const { action, id, type, index, cardId, chart } = actionTarget.dataset;
+            const { action, id, type, index, cardId, chart, invoiceKey } = actionTarget.dataset;
             
             const actionHandlers = {
                 'show-lancar-form': () => this.renderLancamentoForm(actionTarget.dataset.formType),
@@ -658,12 +733,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 'delete-planning-item': () => this.deletePlanningItem(type, parseInt(index)),
                 'sync-invoice': () => this.syncInvoiceValue(parseInt(index), cardId),
                 'delete-transaction': () => { const transaction = this.state.allTransactions.find(t => t.id === id); this.deleteItem('financeiro_lancamentos', id, 'Lançamento', transaction); },
-                'edit-from-details': () => {
-                    this.showTransactionModal(id);
-                },
+                'edit-from-details': () => this.showTransactionModal(id),
                 'show-filter-modal': () => this.showFilterModal(),
                 'show-sort-modal': () => this.showSortModal(),
-                'pay-invoice': () => { const { cardId, invoiceTotal, invoiceKey } = actionTarget.dataset; this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => { } }, { formType: 'pagarFatura', prefill: { destinationAccountId: cardId, value: parseFloat(invoiceTotal), invoiceMonthYear: invoiceKey } }); },
+                'pay-invoice': () => { this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => { } }, { formType: 'pagarFatura', prefill: { destinationAccountId: cardId, value: parseFloat(actionTarget.dataset.invoiceTotal), invoiceMonthYear: invoiceKey } }); },
                 'add-category': () => this.showCategoryModal(), 'edit-category': () => this.showCategoryModal(id), 'delete-category': () => this.deleteItem('financeiro_categorias', id, 'Categoria'),
                 'add-person': () => this.showPersonModal(), 'edit-person': () => this.showPersonModal(id), 'delete-person': () => this.deleteItem('financeiro_pessoas', id, 'Pessoa'),
                 'add-establishment': () => this.showEstablishmentModal(), 'edit-establishment': () => this.showEstablishmentModal(id), 'delete-establishment': () => this.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
@@ -765,14 +838,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 amountSign = '';
             }
             const date = this.getDateObject(transaction.date);
-            const formattedDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-            const formattedTime = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+            const formattedDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
             
             return `<div class="transaction-list-item" data-id="${transaction.id}">
             <div class="icon" style="background-color: ${account?.color || '#e5e5ea'}"><i class="fa-solid ${category?.icon || (isPositive ? 'fa-arrow-up' : 'fa-arrow-down')}"></i></div>
             <div class="details"><div class="description">${primaryText}</div><div class="category">${secondaryText}</div></div>
-            <div class="amount-details"><div class="amount ${amountClass}">${amountSign} ${this.formatCurrency(transaction.value)}</div><div class="date">${formattedDate} - ${formattedTime}</div></div>
-            <div class="actions"><button class="button-icon delete-btn" data-action="delete-transaction" data-id="${transaction.id}" title="Excluir"><i class="fa-solid fa-trash"></i></button></div>
+            <div class="amount-details"><div class="amount ${amountClass}">${amountSign} ${this.formatCurrency(transaction.value)}</div><div class="date">${formattedDate}</div></div>
             </div>`;
         },
         renderLancamentoForm(type, prefillData = {}) {
@@ -783,7 +854,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const creditCards = accounts.filter(a => a.type === 'Cartão de Crédito');
             
             const getOptions = (items = [], selectedId) => {
-                // Cria uma cópia e ordena alfabeticamente pelo nome antes de gerar as opções
                 return [...items]
                     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
                     .map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`)
@@ -917,10 +987,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 await batch.commit();
 
                 if (!isEdit) {
-                    // Limpa apenas os campos de descrição e valor para facilitar lançamentos múltiplos
                     form.querySelector('[name="description"]').value = '';
                     form.querySelector('[name="value"]').value = '';
-                    // Foca no campo de descrição para o próximo lançamento
                     form.querySelector('[name="description"]').focus();
                     sessionStorage.removeItem('lancamentoFormState');
                 } else {
@@ -1383,7 +1451,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <span class="label">Status</span>
                 <span class="value ${isPaid ? 'positive' : 'negative'}">${isPaid ? 'Paga' : 'Aberta'}</span>
                 </div>
-                ${!isPaid && invoiceTotal > 0 ? `<div class="invoice-pay-action"><button class="button-primary" data-action="pay-invoice" data-card-id="${cardId}" data-invoice-total="${invoiceTotal}" data-invoice-key="${currentPeriodKey}"><i class="fa-solid fa-dollar-sign"></i> Pagar Fatura</button></div>` : ''}
+                <div style="display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap;">
+                    ${!isPaid && invoiceTotal > 0 ? `<button class="button-primary" data-action="pay-invoice" data-card-id="${cardId}" data-invoice-total="${invoiceTotal}" data-invoice-key="${currentPeriodKey}"><i class="fa-solid fa-dollar-sign"></i> Pagar Fatura</button>` : ''}
+                </div>
                 </div>
                 <h4 class="invoice-transaction-header">Lançamentos</h4>
                 <div class="transaction-list compact">${transactionsForPeriod.map(t => this.getTransactionHtml(t, false)).join('') || '<div class="empty-state small"><p>Nenhum lançamento.</p></div>'}</div>
@@ -1410,10 +1480,8 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const transactionDate = this.getDateObject(date);
             let invoiceYear = transactionDate.getFullYear();
-            let invoiceMonth = transactionDate.getMonth() + 1; // getMonth é 0-indexado, então +1 para 1-12
+            let invoiceMonth = transactionDate.getMonth() + 1; 
 
-            // Se o dia da transação for maior que o dia de fechamento,
-            // ela pertence à fatura do mês seguinte.
             if (transactionDate.getDate() > card.closingDay) {
                 invoiceMonth += 1;
                 if (invoiceMonth > 12) {
@@ -1613,6 +1681,319 @@ document.addEventListener('DOMContentLoaded', () => {
             this.updateSummary();
             this.showToast(`Fatura de ${card.name} sincronizada!`, 'success');
         },
+
+        // ======================================================================
+        // SEÇÃO DE APARÊNCIA
+        // ======================================================================
+        applySavedSettings() {
+            const savedFontSize = localStorage.getItem('appFontSize');
+            if (savedFontSize) {
+                document.documentElement.style.setProperty('--base-font-size', `${savedFontSize}px`);
+            }
+
+            const savedAnimationStyle = localStorage.getItem('appAnimationStyle');
+            if (savedAnimationStyle) {
+                this.updateAnimationSpeed(savedAnimationStyle);
+            }
+        },
+
+        updateAnimationSpeed(style) {
+            let speed = '0.2s';
+            if (style === 'fluida') speed = '0.4s';
+            if (style === 'instantanea') speed = '0s';
+            document.documentElement.style.setProperty('--animation-speed', speed);
+        },
+        
+        setupAppearanceSettings() {
+            const fontSizeSlider = document.getElementById('font-size-slider');
+            const animationSelector = document.getElementById('animation-style-selector');
+            
+            if (!fontSizeSlider || !animationSelector) return;
+            
+            const savedFontSize = localStorage.getItem('appFontSize') || '16';
+            fontSizeSlider.value = savedFontSize;
+            
+            const savedAnimationStyle = localStorage.getItem('appAnimationStyle') || 'sutil';
+            animationSelector.value = savedAnimationStyle;
+            
+            fontSizeSlider.oninput = (e) => {
+                const newSize = e.target.value;
+                document.documentElement.style.setProperty('--base-font-size', `${newSize}px`);
+                localStorage.setItem('appFontSize', newSize);
+            };
+            
+            animationSelector.onchange = (e) => {
+                const newStyle = e.target.value;
+                this.updateAnimationSpeed(newStyle);
+                localStorage.setItem('appAnimationStyle', newStyle);
+            };
+        },
+
+        // ======================================================================
+        // CENTRAL DE RELATÓRIOS
+        // ======================================================================
+        setupReportGenerator() {
+            const typeSelector = document.getElementById('report-type-selector');
+            const itemSelector = document.getElementById('report-item-selector');
+            const keywordInput = document.getElementById('report-keyword-input');
+            const dateStartInput = document.getElementById('report-date-start');
+            const dateEndInput = document.getElementById('report-date-end');
+            const generateBtn = document.getElementById('generate-report-btn');
+
+            if (!typeSelector) return;
+
+            const updateItemSelector = () => {
+                const type = typeSelector.value;
+                itemSelector.innerHTML = '';
+                keywordInput.classList.add('hidden');
+                itemSelector.classList.remove('hidden');
+
+                let items = [];
+                switch (type) {
+                    case 'category': items = this.state.categories; break;
+                    case 'person': items = this.state.people; break;
+                    case 'establishment': items = this.state.establishments; break;
+                    case 'account': items = this.state.accounts; break;
+                    case 'keyword':
+                        itemSelector.classList.add('hidden');
+                        keywordInput.classList.remove('hidden');
+                        return;
+                }
+                items.sort((a,b) => a.name.localeCompare(b.name)).forEach(item => {
+                    const option = document.createElement('option');
+                    option.value = item.id;
+                    option.textContent = item.name;
+                    itemSelector.appendChild(option);
+                });
+            };
+
+            typeSelector.onchange = updateItemSelector;
+            generateBtn.onclick = () => this.generateReport();
+            
+            const today = new Date();
+            const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
+            dateStartInput.value = this.getLocalISODate(firstDayOfYear);
+            dateEndInput.value = this.getLocalISODate(today);
+
+            updateItemSelector();
+        },
+
+        generateReport() {
+            const type = document.getElementById('report-type-selector').value;
+            const itemId = document.getElementById('report-item-selector').value;
+            const keyword = document.getElementById('report-keyword-input').value.toLowerCase();
+            const startDate = new Date(document.getElementById('report-date-start').value + 'T00:00:00');
+            const endDate = new Date(document.getElementById('report-date-end').value + 'T23:59:59');
+
+            if (!startDate.valueOf() || !endDate.valueOf() || startDate > endDate) {
+                this.showToast('Por favor, selecione um período de datas válido.', 'error');
+                return;
+            }
+
+            let filteredTransactions = this.state.allTransactions.filter(t => {
+                const tDate = this.getDateObject(t.date);
+                return tDate >= startDate && tDate <= endDate;
+            });
+
+            let reportTitle = '';
+            let selectedItemName = '';
+
+            switch (type) {
+                case 'category':
+                    selectedItemName = this.findItemName(itemId, 'categories');
+                    reportTitle = `Relatório de Saídas: ${selectedItemName}`;
+                    filteredTransactions = filteredTransactions.filter(t => t.categoryId === itemId && t.type === 'Saída');
+                    break;
+                case 'person':
+                    selectedItemName = this.findItemName(itemId, 'people');
+                    reportTitle = `Relatório de Transações: ${selectedItemName}`;
+                    filteredTransactions = filteredTransactions.filter(t => t.personId === itemId);
+                    break;
+                case 'establishment':
+                    selectedItemName = this.findItemName(itemId, 'establishments');
+                    reportTitle = `Relatório de Transações: ${selectedItemName}`;
+                    filteredTransactions = filteredTransactions.filter(t => t.establishmentId === itemId);
+                    break;
+                case 'account':
+                    selectedItemName = this.findItemName(itemId, 'accounts');
+                    reportTitle = `Relatório de Transações: ${selectedItemName}`;
+                    filteredTransactions = filteredTransactions.filter(t => t.accountId === itemId);
+                    break;
+                case 'keyword':
+                    if (!keyword) {
+                        this.showToast('Por favor, digite uma palavra-chave para buscar.', 'error');
+                        return;
+                    }
+                    reportTitle = `Relatório por Palavra-Chave: "${keyword}"`;
+                    filteredTransactions = filteredTransactions.filter(t => t.description && t.description.toLowerCase().includes(keyword));
+                    break;
+            }
+
+            const totalIncome = filteredTransactions.filter(t => t.type === 'Entrada').reduce((sum, t) => sum + t.value, 0);
+            const totalExpense = filteredTransactions.filter(t => t.type === 'Saída').reduce((sum, t) => sum + t.value, 0);
+            const finalBalance = totalIncome - totalExpense;
+
+            const summary = { count: filteredTransactions.length, totalIncome, totalExpense, finalBalance };
+            
+            this.state.currentReport = { transactions: filteredTransactions, title: reportTitle, summary };
+            this.showReportModal(this.state.currentReport);
+        },
+
+        showReportModal({transactions, title, summary}) {
+            let transactionsHtml = '<div class="empty-state" style="padding: 20px 0;"><p>Nenhuma transação encontrada.</p></div>';
+
+            if (transactions.length > 0) {
+                transactions.sort((a,b) => this.getDateObject(b.date) - this.getDateObject(a.date));
+                transactionsHtml = transactions.map(t => this.getTransactionHtml(t, true)).join('');
+            }
+
+            const summaryHtml = `
+            <div class="card-details" style="background: var(--bg-tertiary); padding: 16px; margin-top: 24px; border-radius: var(--radius-m);">
+                <h4 class="card-title" style="margin-bottom: 8px; font-size: 16px;">Resumo do Período</h4>
+                <div class="detail-row">
+                    <span class="label">Total de Entradas:</span>
+                    <span class="value positive">${this.formatCurrency(summary.totalIncome)}</span>
+                </div>
+                <div class="detail-row" style="border-bottom: none;">
+                    <span class="label">Total de Saídas:</span>
+                    <span class="value negative">${this.formatCurrency(summary.totalExpense)}</span>
+                </div>
+                <div class="detail-row" style="border-top: 1px solid var(--separator-color); padding-top: 10px; margin-top: 5px; font-weight: bold; font-size: 16px;">
+                    <span class="label">Saldo Final:</span>
+                    <span class="value ${summary.finalBalance >= 0 ? 'positive' : 'negative'}">${this.formatCurrency(summary.finalBalance)}</span>
+                </div>
+            </div>`;
+            
+            const modalHtml = `
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h2>${title}</h2>
+                    <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+                </div>
+                <div class="modal-body" id="report-modal-content">
+                    <p style="color: var(--text-secondary); margin-bottom: 16px; text-align: center; font-weight: 500;">
+                        Exibindo ${summary.count} transações.
+                    </p>
+                    <div class="transaction-list">${transactionsHtml}</div>
+                    ${summaryHtml}
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="button-secondary close-modal-btn">Fechar</button>
+                    <button type="button" id="export-report-pdf-btn" class="button-primary"><i class="fa-solid fa-file-pdf"></i> Gerar PDF</button>
+                </div>
+            </div>`;
+            this.elements.modalContainer.innerHTML = modalHtml;
+            this.setupModalEvents();
+
+            document.getElementById('export-report-pdf-btn').onclick = () => this.exportReportToPdf();
+        },
+
+        exportReportToPdf() {
+            const { jsPDF } = window.jspdf;
+            const exportBtn = document.getElementById('export-report-pdf-btn');
+            const { transactions, title, summary } = this.state.currentReport;
+
+            if (!exportBtn || !transactions) return;
+
+            const originalBtnContent = exportBtn.innerHTML;
+            exportBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`;
+            exportBtn.disabled = true;
+
+            try {
+                const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+                
+                const printContainer = document.createElement('div');
+                printContainer.style.position = 'absolute';
+                printContainer.style.left = '-9999px';
+                printContainer.style.width = '210mm';
+                printContainer.style.boxSizing = 'border-box';
+                printContainer.style.fontSize = '12px';
+                
+                let html = `
+                    <style>
+                        body { font-family: 'Helvetica', 'Arial', sans-serif; }
+                        h1 { font-size: 16pt; margin-bottom: 5mm; color: #1c1e21; border-bottom: 0.5mm solid #e5e5ea; padding-bottom: 3mm; }
+                        p { font-size: 10pt; color: #606770; margin-bottom: 10mm; }
+                        table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+                        th, td { border-bottom: 0.3mm solid #e5e5ea; padding: 3mm 1mm; text-align: left; }
+                        th { font-weight: bold; color: #1c1e21; }
+                        .text-right { text-align: right; }
+                        .positive { color: #28a745 !important; }
+                        .negative { color: #dc3545 !important; }
+                        .summary-block { page-break-inside: avoid; margin-top: 10mm; }
+                        .summary-table { width: 50%; float: right; }
+                        .summary-table td { border-bottom: 0.3mm solid #e5e5ea; }
+                        .summary-table tr:last-child td { border-bottom: none; }
+                        .summary-table .total { font-weight: bold; font-size: 10pt; }
+                    </style>
+                    <h1>${title}</h1>
+                    <p>Exibindo ${summary.count} transações.</p>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Descrição</th>
+                                <th>Conta</th>
+                                <th class="text-right">Valor</th>
+                            </tr>
+                        </thead>
+                        <tbody>`;
+
+                transactions.forEach(t => {
+                    const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
+                    const description = t.description || 'N/A';
+                    const account = this.findItemName(t.accountId, 'accounts');
+                    const amountColor = t.type === 'Entrada' ? 'positive' : 'negative';
+                    const amountSign = t.type === 'Entrada' ? '+' : '';
+                    const value = this.formatCurrency(t.value);
+
+                    html += `
+                        <tr>
+                            <td>${date}</td>
+                            <td>${description}</td>
+                            <td>${account}</td>
+                            <td class="text-right ${amountColor}">${amountSign}${value}</td>
+                        </tr>
+                    `;
+                });
+                
+                html += `</tbody></table>`;
+                
+                html += `
+                    <div class="summary-block">
+                        <table class="summary-table">
+                            <tbody>
+                                <tr><td>Total de Entradas:</td><td class="text-right positive">${this.formatCurrency(summary.totalIncome)}</td></tr>
+                                <tr><td>Total de Saídas:</td><td class="text-right negative">${this.formatCurrency(summary.totalExpense)}</td></tr>
+                                <tr class="total"><td>Saldo Final:</td><td class="text-right ${summary.finalBalance >= 0 ? 'positive' : 'negative'}">${this.formatCurrency(summary.finalBalance)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>`;
+                
+                printContainer.innerHTML = html;
+                document.body.appendChild(printContainer);
+
+                doc.html(printContainer, {
+                    callback: (pdf) => {
+                        document.body.removeChild(printContainer);
+                        const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
+                        pdf.save(filename);
+                        exportBtn.innerHTML = originalBtnContent;
+                        exportBtn.disabled = false;
+                    },
+                    margin: [15, 15, 15, 15],
+                    autoPaging: 'text',
+                    width: 180,
+                    windowWidth: 794
+                });
+
+            } catch(err) {
+                this.showToast('Erro ao gerar PDF.', 'error');
+                console.error(err);
+                exportBtn.innerHTML = originalBtnContent;
+                exportBtn.disabled = false;
+            }
+        }
     };
 
     App.init();
