@@ -47,6 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 nextMonthBtn: document.getElementById('next-month-btn'),
                 modalContainer: document.getElementById('modal-container'),
                 toastContainer: document.getElementById('toast-container'),
+                loadingOverlay: document.getElementById('loading-overlay'),
                 planningKeydownListener: null
             };
             if (!firebase.apps.length) firebase.initializeApp(this.config.firebase);
@@ -86,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const startApp = () => {
                 this.elements.authContainer.style.display = 'none';
-                this.applySavedSettings(); // Aplica as configurações salvas
+                this.applySavedSettings();
                 this.elements.appRoot.classList.add('is-visible');
                 this.elements.body.classList.remove('is-loading');
                 this.attachEventListeners();
@@ -1898,104 +1899,127 @@ document.addEventListener('DOMContentLoaded', () => {
             const originalBtnContent = exportBtn.innerHTML;
             exportBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`;
             exportBtn.disabled = true;
-
-            try {
-                const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-                
-                const printContainer = document.createElement('div');
-                printContainer.style.position = 'absolute';
-                printContainer.style.left = '-9999px';
-                printContainer.style.width = '210mm';
-                printContainer.style.boxSizing = 'border-box';
-                printContainer.style.fontSize = '12px';
-                
-                let html = `
-                    <style>
-                        body { font-family: 'Helvetica', 'Arial', sans-serif; }
-                        h1 { font-size: 16pt; margin-bottom: 5mm; color: #1c1e21; border-bottom: 0.5mm solid #e5e5ea; padding-bottom: 3mm; }
-                        p { font-size: 10pt; color: #606770; margin-bottom: 10mm; }
-                        table { width: 100%; border-collapse: collapse; font-size: 9pt; }
-                        th, td { border-bottom: 0.3mm solid #e5e5ea; padding: 3mm 1mm; text-align: left; }
-                        th { font-weight: bold; color: #1c1e21; }
-                        .text-right { text-align: right; }
-                        .positive { color: #28a745 !important; }
-                        .negative { color: #dc3545 !important; }
-                        .summary-block { page-break-inside: avoid; margin-top: 10mm; }
-                        .summary-table { width: 50%; float: right; }
-                        .summary-table td { border-bottom: 0.3mm solid #e5e5ea; }
-                        .summary-table tr:last-child td { border-bottom: none; }
-                        .summary-table .total { font-weight: bold; font-size: 10pt; }
-                    </style>
-                    <h1>${title}</h1>
-                    <p>Exibindo ${summary.count} transações.</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>Descrição</th>
-                                <th>Conta</th>
-                                <th class="text-right">Valor</th>
-                            </tr>
-                        </thead>
-                        <tbody>`;
-
-                transactions.forEach(t => {
-                    const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
-                    const description = t.description || 'N/A';
-                    const account = this.findItemName(t.accountId, 'accounts');
-                    const amountColor = t.type === 'Entrada' ? 'positive' : 'negative';
-                    const amountSign = t.type === 'Entrada' ? '+' : '';
-                    const value = this.formatCurrency(t.value);
-
-                    html += `
-                        <tr>
-                            <td>${date}</td>
-                            <td>${description}</td>
-                            <td>${account}</td>
-                            <td class="text-right ${amountColor}">${amountSign}${value}</td>
-                        </tr>
-                    `;
-                });
-                
-                html += `</tbody></table>`;
-                
-                html += `
-                    <div class="summary-block">
-                        <table class="summary-table">
-                            <tbody>
-                                <tr><td>Total de Entradas:</td><td class="text-right positive">${this.formatCurrency(summary.totalIncome)}</td></tr>
-                                <tr><td>Total de Saídas:</td><td class="text-right negative">${this.formatCurrency(summary.totalExpense)}</td></tr>
-                                <tr class="total"><td>Saldo Final:</td><td class="text-right ${summary.finalBalance >= 0 ? 'positive' : 'negative'}">${this.formatCurrency(summary.finalBalance)}</td></tr>
-                            </tbody>
-                        </table>
-                    </div>`;
-                
-                printContainer.innerHTML = html;
-                document.body.appendChild(printContainer);
-
-                doc.html(printContainer, {
-                    callback: (pdf) => {
-                        document.body.removeChild(printContainer);
-                        const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
-                        pdf.save(filename);
-                        exportBtn.innerHTML = originalBtnContent;
-                        exportBtn.disabled = false;
-                    },
-                    margin: [15, 15, 15, 15],
-                    autoPaging: 'text',
-                    width: 180,
-                    windowWidth: 794
-                });
-
-            } catch(err) {
-                this.showToast('Erro ao gerar PDF.', 'error');
-                console.error(err);
+            
+            const failsafeTimeout = setTimeout(() => {
+                this.showToast('A geração do PDF demorou demais e foi cancelada.', 'error');
                 exportBtn.innerHTML = originalBtnContent;
                 exportBtn.disabled = false;
-            }
+            }, 15000); // 15 segundos de tempo limite
+
+            // Usamos um pequeno timeout para garantir que a UI atualize antes do processamento pesado
+            setTimeout(() => {
+                try {
+                    const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+                    const margin = 15;
+                    const pageWidth = doc.internal.pageSize.getWidth();
+                    const pageHeight = doc.internal.pageSize.getHeight();
+                    const contentWidth = pageWidth - margin * 2;
+                    let y = margin;
+                    
+                    doc.setFontSize(18);
+                    doc.text(title, margin, y);
+                    y += 10;
+                    
+                    doc.setFontSize(10);
+                    doc.setTextColor(100);
+                    doc.text(`Exibindo ${summary.count} transações.`, margin, y);
+                    y += 10;
+
+                    // Cabeçalho da Tabela
+                    doc.setFontSize(10);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Data', margin, y);
+                    doc.text('Descrição', margin + 25, y);
+                    doc.text('Conta', margin + 110, y);
+                    doc.text('Valor', contentWidth + margin, y, { align: 'right' });
+                    y += 2;
+                    doc.line(margin, y, pageWidth - margin, y);
+                    y += 8;
+
+                    doc.setFont(undefined, 'normal');
+                    transactions.forEach(t => {
+                        if (y > pageHeight - margin - 20) { // Verifica se há espaço para mais uma linha + resumo
+                            doc.addPage();
+                            y = margin;
+                            // Redesenha cabeçalho na nova página
+                            doc.setFontSize(10);
+                            doc.setFont(undefined, 'bold');
+                            doc.text('Data', margin, y);
+                            doc.text('Descrição', margin + 25, y);
+                            doc.text('Conta', margin + 110, y);
+                            doc.text('Valor', contentWidth + margin, y, { align: 'right' });
+                            y += 2;
+                            doc.line(margin, y, pageWidth - margin, y);
+                            y += 8;
+                            doc.setFont(undefined, 'normal');
+                        }
+                        
+                        const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
+                        const description = doc.splitTextToSize(t.description || 'N/A', 80); // Quebra de linha
+                        const account = this.findItemName(t.accountId, 'accounts');
+                        const value = this.formatCurrency(t.value);
+                        const isPositive = t.type === 'Entrada';
+                        
+                        doc.setTextColor(0, 0, 0);
+                        doc.text(date, margin, y);
+                        doc.text(description, margin + 25, y);
+                        doc.text(account, margin + 110, y);
+
+                        doc.setTextColor(isPositive ? '#28a745' : '#dc3545');
+                        doc.text(`${isPositive ? '+' : ''}${value}`, contentWidth + margin, y, { align: 'right' });
+
+                        y += (Array.isArray(description) ? description.length * 5 : 5) + 3; // Aumenta o y
+                    });
+                    
+                    // Resumo Final
+                    y += 10;
+                    if (y > pageHeight - margin - 30) {
+                        doc.addPage();
+                        y = margin;
+                    }
+                    
+                    doc.setFontSize(11);
+                    doc.setFont(undefined, 'bold');
+                    doc.text('Resumo do Período', contentWidth - 40, y);
+                    y += 8;
+                    
+                    doc.setFontSize(10);
+                    doc.setFont(undefined, 'normal');
+                    doc.setTextColor(0, 0, 0);
+                    doc.text('Total de Entradas:', contentWidth - 40, y);
+                    doc.setTextColor('#28a745');
+                    doc.text(this.formatCurrency(summary.totalIncome), contentWidth + margin, y, { align: 'right'});
+                    y += 7;
+                    
+                    doc.setTextColor(0, 0, 0);
+                    doc.text('Total de Saídas:', contentWidth - 40, y);
+                    doc.setTextColor('#dc3545');
+                    doc.text(this.formatCurrency(summary.totalExpense), contentWidth + margin, y, { align: 'right'});
+                    y += 2;
+                    doc.line(contentWidth - 40, y, contentWidth + margin, y);
+                    y += 7;
+                    
+                    doc.setFont(undefined, 'bold');
+                    doc.setTextColor(0, 0, 0);
+                    doc.text('Saldo Final:', contentWidth - 40, y);
+                    doc.setTextColor(summary.finalBalance >= 0 ? '#28a745' : '#dc3545');
+                    doc.text(this.formatCurrency(summary.finalBalance), contentWidth + margin, y, { align: 'right'});
+
+                    const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
+                    doc.save(filename);
+                    
+                } catch(err) {
+                    this.showToast('Erro ao gerar PDF.', 'error');
+                    console.error(err);
+                } finally {
+                    clearTimeout(failsafeTimeout);
+                    exportBtn.innerHTML = originalBtnContent;
+                    exportBtn.disabled = false;
+                }
+            }, 100);
         }
     };
 
     App.init();
     window.App = App;
-});
+});,
