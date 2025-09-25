@@ -48,6 +48,36 @@ body.is-loading {
     height: 100vh;
 }
 
+#loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    gap: 1rem;
+}
+
+#loading-overlay .loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 5px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+
 /* ====================================================================== */
 /* AUTENTICAÇÃO */
 /* ====================================================================== */
@@ -327,6 +357,7 @@ body.is-loading {
 .form-group input[type="number"],
 .form-group input[type="date"],
 .form-group input[type="color"],
+.form-group input[type="range"],
 .form-group select,
 #month-year-selector,
 #invoice-card-selector,
@@ -342,6 +373,9 @@ body.is-loading {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
+}
+.form-group input[type="range"] {
+    padding: 0;
 }
 .form-group input:focus,
 .form-group select:focus,
@@ -436,7 +470,7 @@ body.is-loading {
     position: relative;
     box-shadow: var(--shadow-light);
     transition: transform var(--animation-speed) ease;
-    display: flex; /* Adicionado para uniformizar altura */
+    display: flex; 
 }
 .account-card-display:hover {
     transform: translateY(-5px);
@@ -495,7 +529,7 @@ body.is-loading {
 }
 .hidden { display: none; }
 .card-body {
-    flex-grow: 1; /* Adicionado para uniformizar altura */
+    flex-grow: 1; 
 }
 .card-body .label { font-size: 0.875rem; opacity: 0.8; } /* 14px */
 .card-body .main-value { font-size: 2rem; font-weight: 700; } /* 32px */
@@ -1012,6 +1046,10 @@ body.is-loading {
         grid-template-columns: 1fr;
     }
     
+    #report-generator .form-group {
+        margin-bottom: 0.75rem; 
+    }
+
     .mobile-nav {
         display: flex;
         position: fixed;
