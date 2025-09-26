@@ -735,6 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'sync-invoice': () => this.syncInvoiceValue(parseInt(index), cardId),
                 'delete-transaction': () => { const transaction = this.state.allTransactions.find(t => t.id === id); this.deleteItem('financeiro_lancamentos', id, 'Lançamento', transaction); },
                 'edit-from-details': () => this.showTransactionModal(id),
+                'manage-installments': () => this.showInstallmentManagementModal(id),
                 'show-filter-modal': () => this.showFilterModal(),
                 'show-sort-modal': () => this.showSortModal(),
                 'pay-invoice': () => { this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => { } }, { formType: 'pagarFatura', prefill: { destinationAccountId: cardId, value: parseFloat(actionTarget.dataset.invoiceTotal), invoiceMonthYear: invoiceKey } }); },
@@ -761,6 +762,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'establishment-form': () => this.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento'),
                 'transaction-form': () => this.saveTransaction(form, true),
                 'installment-form': () => this.saveInstallmentEdit(form),
+                'anticipate-installments-form': () => this.anticipateInstallments(form),
                 'lancar-form': () => this.saveTransaction(form),
                 'filter-form': () => {
                     const formData = new FormData(form);
@@ -891,7 +893,7 @@ document.addEventListener('DOMContentLoaded', () => {
             form.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
                     e.preventDefault();
-                    const fields = Array.from(form.querySelectorAll('input, select'));
+                    const fields = Array.from(form.querySelectorAll('input, select')).filter(field => field.offsetParent !== null);
                     const currentIndex = fields.indexOf(e.target);
                     const nextField = fields[currentIndex + 1];
                     if (nextField) {
@@ -901,18 +903,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             });
-
-            setTimeout(() => {
-                const mainContent = document.querySelector('.main-content');
-                if (container && mainContent && container.offsetParent) {
-                    const headerHeight = document.querySelector('.main-header')?.offsetHeight || 80;
-                    const targetPosition = container.offsetTop - headerHeight - 20;
-                    mainContent.scrollTo({
-                        top: targetPosition,
-                        behavior: 'smooth'
-                    });
-                }
-            }, 100);
         },
         async saveTransaction(form, isEdit = false) {
             const formData = new FormData(form);
@@ -1279,6 +1269,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const establishmentName = transaction.establishmentId ? this.findItemName(transaction.establishmentId, 'establishments') : null;
 
             const canBeModified = transaction.type !== 'Pagamento de Fatura' && transaction.type !== 'Transferência';
+            const isInstallment = !!transaction.installmentGroupId;
+
+            let actionButtons = '';
+            if (canBeModified) {
+                actionButtons += `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button>`;
+                if (isInstallment) {
+                    actionButtons += `<button type="button" class="button-primary" data-action="manage-installments" data-id="${transaction.id}"><i class="fa-solid fa-tasks"></i> Gerenciar Parcelas</button>`;
+                } else {
+                    actionButtons += `<button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>`;
+                }
+            }
+
 
             const modalHtml = `
             <div class="modal-content">
@@ -1301,8 +1303,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="modal-actions">
                     <button type="button" class="button-secondary close-modal-btn">Fechar</button>
-                    ${canBeModified ? `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button>` : ''}
-                    ${canBeModified ? `<button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>` : ''}
+                    ${actionButtons}
                 </div>
             </div>`;
 
@@ -1765,14 +1766,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // CENTRAL DE RELATÓRIOS
         // ======================================================================
         setupReportGenerator() {
+            const reportGenerator = document.getElementById('report-generator');
+            if (!reportGenerator) return;
+
             const typeSelector = document.getElementById('report-type-selector');
             const itemSelector = document.getElementById('report-item-selector');
             const keywordInput = document.getElementById('report-keyword-input');
             const dateStartInput = document.getElementById('report-date-start');
             const dateEndInput = document.getElementById('report-date-end');
             const generateBtn = document.getElementById('generate-report-btn');
-
-            if (!typeSelector) return;
 
             const updateItemSelector = () => {
                 const type = typeSelector.value;
@@ -1802,20 +1804,55 @@ document.addEventListener('DOMContentLoaded', () => {
             typeSelector.onchange = updateItemSelector;
             generateBtn.onclick = () => this.generateReport();
             
-            const today = new Date();
-            const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
-            dateStartInput.value = this.getLocalISODate(firstDayOfYear);
-            dateEndInput.value = this.getLocalISODate(today);
+            const savedFiltersJSON = localStorage.getItem('lastReportFilters');
+            if (savedFiltersJSON) {
+                const savedFilters = JSON.parse(savedFiltersJSON);
+                dateStartInput.value = savedFilters.startDate;
+                dateEndInput.value = savedFilters.endDate;
+                typeSelector.value = savedFilters.type;
+                updateItemSelector(); // Popula o seletor de item
+                setTimeout(() => { // Garante que o seletor foi populado antes de setar o valor
+                    if (savedFilters.type === 'keyword') {
+                        keywordInput.value = savedFilters.keyword;
+                    } else {
+                        itemSelector.value = savedFilters.itemId;
+                    }
+                }, 0);
+            } else {
+                const today = new Date();
+                const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
+                dateStartInput.value = this.getLocalISODate(firstDayOfYear);
+                dateEndInput.value = this.getLocalISODate(today);
+                updateItemSelector();
+            }
 
-            updateItemSelector();
+            reportGenerator.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
+                    e.preventDefault();
+                    const fields = Array.from(reportGenerator.querySelectorAll('input:not(.hidden), select:not(.hidden)'));
+                    const currentIndex = fields.indexOf(e.target);
+                    const nextField = fields[currentIndex + 1];
+                    if (nextField) {
+                        nextField.focus();
+                    } else {
+                        generateBtn.click();
+                    }
+                }
+            });
         },
 
         generateReport() {
             const type = document.getElementById('report-type-selector').value;
             const itemId = document.getElementById('report-item-selector').value;
             const keyword = document.getElementById('report-keyword-input').value.toLowerCase();
-            const startDate = new Date(document.getElementById('report-date-start').value + 'T00:00:00');
-            const endDate = new Date(document.getElementById('report-date-end').value + 'T23:59:59');
+            const startDateStr = document.getElementById('report-date-start').value;
+            const endDateStr = document.getElementById('report-date-end').value;
+            
+            const reportFilters = { type, itemId, keyword, startDate: startDateStr, endDate: endDateStr };
+            localStorage.setItem('lastReportFilters', JSON.stringify(reportFilters));
+
+            const startDate = new Date(startDateStr + 'T00:00:00');
+            const endDate = new Date(endDateStr + 'T23:59:59');
 
             if (!startDate.valueOf() || !endDate.valueOf() || startDate > endDate) {
                 this.showToast('Por favor, selecione um período de datas válido.', 'error');
@@ -1920,128 +1957,134 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('export-report-pdf-btn').onclick = () => this.exportReportToPdf();
         },
 
-        async exportReportToPdf() {
-            const { jsPDF } = window.jspdf;
+        exportReportToPdf() {
             const exportBtn = document.getElementById('export-report-pdf-btn');
-            const { transactions, title, summary } = this.state.currentReport;
-        
-            if (!exportBtn || !transactions) return;
-        
+            if(!exportBtn) return;
+            
             const originalBtnContent = exportBtn.innerHTML;
             exportBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`;
             exportBtn.disabled = true;
-        
-            // Fail-safe timeout
+
+            // Failsafe timeout in case something goes wrong
             const failsafeTimeout = setTimeout(() => {
                 this.showToast('A geração do PDF demorou demais e foi cancelada.', 'error');
                 exportBtn.innerHTML = originalBtnContent;
                 exportBtn.disabled = false;
-            }, 15000);
-        
-            try {
-                // Give the UI a moment to update
-                await new Promise(resolve => setTimeout(resolve, 50));
-        
-                const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-                const margin = 15;
-                const pageWidth = doc.internal.pageSize.getWidth();
-                const pageHeight = doc.internal.pageSize.getHeight();
-                const contentWidth = pageWidth - margin * 2;
-                let y = margin;
-        
+            }, 15000); // 15 seconds
+
+            // Use a timeout to ensure the UI updates to the loading state before heavy processing
+            setTimeout(() => {
+                this.buildAndSavePdf().then(() => {
+                    clearTimeout(failsafeTimeout); // Success, so clear the failsafe
+                }).catch(err => {
+                    clearTimeout(failsafeTimeout);
+                    this.showToast('Ocorreu um erro ao gerar o PDF.', 'error');
+                    console.error("PDF Generation Error:", err);
+                }).finally(() => {
+                    exportBtn.innerHTML = originalBtnContent;
+                    exportBtn.disabled = false;
+                });
+            }, 100);
+        },
+
+        async buildAndSavePdf() {
+            const { jsPDF } = window.jspdf;
+            const { transactions, title, summary } = this.state.currentReport;
+            const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+            
+            const margin = 15;
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const pageHeight = doc.internal.pageSize.getHeight();
+            const contentWidth = pageWidth - margin * 2;
+            let y = margin;
+
+            const addHeader = () => {
                 doc.setFontSize(18);
                 doc.text(title, margin, y);
                 y += 10;
-        
+                
                 doc.setFontSize(10);
                 doc.setTextColor(100);
                 doc.text(`Exibindo ${summary.count} transações.`, margin, y);
                 y += 10;
-        
-                const drawHeader = () => {
-                    doc.setFontSize(10);
-                    doc.setFont(undefined, 'bold');
-                    doc.text('Data', margin, y);
-                    doc.text('Descrição', margin + 25, y);
-                    doc.text('Conta', margin + 110, y);
-                    doc.text('Valor', contentWidth + margin, y, { align: 'right' });
-                    y += 2;
-                    doc.line(margin, y, pageWidth - margin, y);
-                    y += 8;
-                    doc.setFont(undefined, 'normal');
-                };
-        
-                drawHeader();
-        
-                transactions.forEach(t => {
-                    const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
-                    const description = doc.splitTextToSize(t.description || 'N/A', 80);
-                    const account = this.findItemName(t.accountId, 'accounts');
-                    const value = this.formatCurrency(t.value);
-                    const isPositive = t.type === 'Entrada';
-                    const lineHeight = (Array.isArray(description) ? description.length * 5 : 5) + 3;
+            };
 
-                    if (y + lineHeight > pageHeight - margin) {
-                        doc.addPage();
-                        y = margin;
-                        drawHeader();
-                    }
-                    
-                    doc.setTextColor(0, 0, 0);
-                    doc.text(date, margin, y);
-                    doc.text(description, margin + 25, y);
-                    doc.text(account, margin + 110, y);
-        
-                    doc.setTextColor(isPositive ? '#28a745' : '#dc3545');
-                    doc.text(`${isPositive ? '+' : ''}${value}`, contentWidth + margin, y, { align: 'right'});
-        
-                    y += lineHeight;
-                });
-        
-                if (y > pageHeight - margin - 30) {
+            const addTableHead = () => {
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                doc.text('Data', margin, y);
+                doc.text('Descrição', margin + 25, y);
+                doc.text('Conta', margin + 110, y);
+                doc.text('Valor', contentWidth + margin, y, { align: 'right' });
+                y += 2;
+                doc.line(margin, y, pageWidth - margin, y);
+                y += 8;
+                doc.setFont(undefined, 'normal');
+            };
+
+            addHeader();
+            addTableHead();
+
+            transactions.forEach(t => {
+                const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
+                const descriptionLines = doc.splitTextToSize(t.description || 'N/A', 80);
+                const account = this.findItemName(t.accountId, 'accounts');
+                const value = this.formatCurrency(t.value);
+                const isPositive = t.type === 'Entrada';
+                const lineHeight = (Array.isArray(descriptionLines) ? descriptionLines.length * 5 : 5) + 3;
+
+                if (y + lineHeight > pageHeight - margin) {
                     doc.addPage();
                     y = margin;
+                    addTableHead();
                 }
                 
-                y += 10;
-                doc.setFontSize(11);
-                doc.setFont(undefined, 'bold');
-                doc.text('Resumo do Período', contentWidth - 40, y);
-                y += 8;
-        
-                doc.setFontSize(10);
-                doc.setFont(undefined, 'normal');
                 doc.setTextColor(0, 0, 0);
-                doc.text('Total de Entradas:', contentWidth - 40, y);
-                doc.setTextColor('#28a745');
-                doc.text(this.formatCurrency(summary.totalIncome), contentWidth + margin, y, { align: 'right'});
-                y += 7;
-        
-                doc.setTextColor(0, 0, 0);
-                doc.text('Total de Saídas:', contentWidth - 40, y);
-                doc.setTextColor('#dc3545');
-                doc.text(this.formatCurrency(summary.totalExpense), contentWidth + margin, y, { align: 'right'});
-                y += 2;
-                doc.line(contentWidth - 40, y, contentWidth + margin, y);
-                y += 7;
-        
-                doc.setFont(undefined, 'bold');
-                doc.setTextColor(0, 0, 0);
-                doc.text('Saldo Final:', contentWidth - 40, y);
-                doc.setTextColor(summary.finalBalance >= 0 ? '#28a745' : '#dc3545');
-                doc.text(this.formatCurrency(summary.finalBalance), contentWidth + margin, y, { align: 'right'});
+                doc.text(date, margin, y);
+                doc.text(descriptionLines, margin + 25, y);
+                doc.text(account, margin + 110, y);
 
-                const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
-                doc.save(filename);
-        
-            } catch(err) {
-                this.showToast('Erro ao gerar PDF.', 'error');
-                console.error(err);
-            } finally {
-                clearTimeout(failsafeTimeout);
-                exportBtn.innerHTML = originalBtnContent;
-                exportBtn.disabled = false;
+                doc.setTextColor(isPositive ? '#28a745' : '#dc3545');
+                doc.text(`${isPositive ? '+' : ''}${value}`, contentWidth + margin, y, { align: 'right' });
+
+                y += lineHeight;
+            });
+
+            if (y > pageHeight - margin - 30) {
+                doc.addPage();
+                y = margin;
             }
+            
+            y += 10;
+            doc.setFontSize(11);
+            doc.setFont(undefined, 'bold');
+            doc.text('Resumo do Período', contentWidth - 40, y);
+            y += 8;
+            
+            doc.setFontSize(10);
+            doc.setFont(undefined, 'normal');
+            doc.setTextColor(0, 0, 0);
+            doc.text('Total de Entradas:', contentWidth - 40, y);
+            doc.setTextColor('#28a745');
+            doc.text(this.formatCurrency(summary.totalIncome), contentWidth + margin, y, { align: 'right'});
+            y += 7;
+            
+            doc.setTextColor(0, 0, 0);
+            doc.text('Total de Saídas:', contentWidth - 40, y);
+            doc.setTextColor('#dc3545');
+            doc.text(this.formatCurrency(summary.totalExpense), contentWidth + margin, y, { align: 'right'});
+            y += 2;
+            doc.line(contentWidth - 40, y, contentWidth + margin, y);
+            y += 7;
+            
+            doc.setFont(undefined, 'bold');
+            doc.setTextColor(0, 0, 0);
+            doc.text('Saldo Final:', contentWidth - 40, y);
+            doc.setTextColor(summary.finalBalance >= 0 ? '#28a745' : '#dc3545');
+            doc.text(this.formatCurrency(summary.finalBalance), contentWidth + margin, y, { align: 'right'});
+
+            const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
+            doc.save(filename);
         }
     };
 
