@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
             people: [],
             establishments: [],
             associations: [],
+            ocrRules: [], // Armazena as regras do OCR
             listeners: [],
             charts: {},
             isLoading: true,
@@ -174,7 +175,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 'financeiro_categorias': 'categories',
                 'financeiro_pessoas': 'people',
                 'financeiro_estabelecimentos': 'establishments',
-                'financeiro_associacoes': 'associations'
+                'financeiro_associacoes': 'associations',
+                'financeiro_regras_ocr': 'ocrRules'
             };
             const promises = Object.entries(collections).map(([col, stateKey]) =>
                 new Promise(resolve => {
@@ -194,9 +196,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const transactionsListener = this.db.collection('financeiro_lancamentos').orderBy('date', 'desc').onSnapshot(snapshot => {
                 this.state.allTransactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 this.populateMonthSelector();
-                Promise.all(promises).then(() => {
+                Promise.all(promises).then(async () => {
                     const wasLoading = this.state.isLoading;
                     this.state.isLoading = false;
+                    
+                    if((!this.state.ocrRules || this.state.ocrRules.length === 0) && wasLoading) {
+                        await this.seedDefaultOcrRules();
+                    }
+
                     const viewsToUpdate = ['resumos', 'movements', 'invoices', 'planning'];
                     if (wasLoading || viewsToUpdate.includes(this.state.currentView)) {
                         this.render();
@@ -309,6 +316,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             if (this.state.currentView === 'settings') {
                 this.setupAppearanceSettings();
+                this.renderOcrRulesList();
             }
         },
 
@@ -444,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const getItemsHtml = (items, type, icon) => {
                 if (!items || items.length === 0) return `<div class="empty-state" style="padding: 20px 0;">Nenhum item cadastrado.</div>`;
                 return items
-                    .filter(item => !!item && !!item.name) // CORREÇÃO: Garante que o item existe e tem um nome antes de ordenar
+                    .filter(item => !!item && !!item.name)
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(item => `
                     <div class="item-list-row">
@@ -496,7 +504,60 @@ document.addEventListener('DOMContentLoaded', () => {
                         </select>
                     </div>
                 </div>
+                <div class="settings-section">
+                    <div class="settings-section-header">
+                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-robot"></i> Regras do Leitor de Comprovantes (OCR)</h3>
+                        <button class="button-primary" data-action="add-ocr-rule"><i class="fa-solid fa-plus"></i> Adicionar Regra</button>
+                    </div>
+                    <div id="ocr-rules-list"><div class="loading-spinner small"></div></div>
+                </div>
             </div>`;
+        },
+        renderOcrRulesList() {
+            const container = document.getElementById('ocr-rules-list');
+            if (!container) return;
+        
+            const rules = this.state.ocrRules || [];
+            if (rules.length === 0) {
+                container.innerHTML = `<div class="empty-state" style="padding: 20px 0;">Nenhuma regra de OCR cadastrada.</div>`;
+                return;
+            }
+        
+            const groupedRules = rules.reduce((acc, rule) => {
+                if (!acc[rule.type]) acc[rule.type] = [];
+                acc[rule.type].push(rule);
+                return acc;
+            }, {});
+        
+            const typeNames = {
+                value: 'Valor',
+                date: 'Data',
+                description: 'Descrição/Estabelecimento',
+                installments: 'Parcelas'
+            };
+        
+            let html = '';
+            for (const type in typeNames) {
+                if (groupedRules[type]) {
+                    html += `<h4 class="planning-subsection-header">${typeNames[type]}</h4>`;
+                    groupedRules[type]
+                        .sort((a, b) => (a.priority || 99) - (b.priority || 99))
+                        .forEach(rule => {
+                            html += `
+                            <div class="item-list-row">
+                                <span class="icon-name" style="align-items: flex-start; flex-direction: column; gap: 4px;">
+                                    <div><i class="fa-solid ${!rule.enabled ? 'fa-eye-slash' : 'fa-file-code'}"></i> ${rule.name} ${!rule.enabled ? '<span style="font-size: 12px; color: var(--text-secondary);">(Inativa)</span>' : ''}</div>
+                                    <code style="font-size: 12px; color: var(--text-secondary);">${rule.pattern}</code>
+                                </span>
+                                <div class="actions">
+                                    <button class="button-icon" data-action="edit-ocr-rule" data-id="${rule.id}"><i class="fa-solid fa-pen"></i></button>
+                                    <button class="button-icon delete-btn" data-action="delete-ocr-rule" data-id="${rule.id}"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                            </div>`;
+                        });
+                }
+            }
+            container.innerHTML = html;
         },
         getAccountsHtml() {
             const accountsToRender = this.state.accounts.filter(acc => acc && (this.state.showArchived || !acc.arquivado));
@@ -746,6 +807,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 'add-person': () => this.showPersonModal(), 'edit-person': () => this.showPersonModal(id), 'delete-person': () => this.deleteItem('financeiro_pessoas', id, 'Pessoa'),
                 'add-establishment': () => this.showEstablishmentModal(), 'edit-establishment': () => this.showEstablishmentModal(id), 'delete-establishment': () => this.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
                 'show-association-modal': () => this.showAssociationModal(actionTarget.dataset.description),
+                'add-ocr-rule': () => this.showOcrRuleModal(),
+                'edit-ocr-rule': () => this.showOcrRuleModal(id),
+                'delete-ocr-rule': () => this.deleteItem('financeiro_regras_ocr', id, 'Regra OCR'),
             };
 
             if (actionHandlers[action]) {
@@ -769,6 +833,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'installment-form': () => this.saveInstallmentEdit(form),
                 'anticipate-installments-form': () => this.anticipateInstallments(form),
                 'lancar-form': () => this.saveTransaction(form),
+                'ocr-rule-form': () => this.saveItem(e, 'financeiro_regras_ocr', 'Regra OCR'),
                 'filter-form': () => {
                     const formData = new FormData(form);
                     this.state.movementsFilter.type = formData.get('type');
@@ -987,8 +1052,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
+            // CORREÇÃO: Chama explicitamente o handler de descrição para acionar a busca por estabelecimento
             if (prefillData.description) {
-                this.handleDescriptionChange(prefillData.description, form);
+                const newForm = container.querySelector('#lancar-form');
+                if (newForm) {
+                    this.handleDescriptionChange(prefillData.description, newForm);
+                }
             }
         },
         async saveTransaction(form, isEdit = false) {
@@ -1130,11 +1199,40 @@ document.addEventListener('DOMContentLoaded', () => {
                         delete data.closingDay;
                     }
                     data.identificadores = data.identificadores.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-                }
-
-                if (itemName === 'Estabelecimento') {
+                } else if (itemName === 'Estabelecimento') {
                     data.categoriaPadraoId = data.categoriaPadraoId || '';
                     data.aliases = data.aliases.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                } else if (itemName === 'Regra OCR') {
+                    data.priority = parseInt(data.priority) || 99;
+                    data.enabled = !!data.enabled;
+
+                    const isSimpleMode = form.querySelector('.mode-btn[data-mode="simple"]')?.classList.contains('active');
+                    if (isSimpleMode) {
+                        const wizardType = data.wizard_type;
+                        const wizardValue = this.escapeRegex(data.wizard_value || '');
+                        let generatedPattern = '';
+
+                        switch(wizardType) {
+                            case 'starts_with':
+                                generatedPattern = `^${wizardValue}\\s*([\\s\\S]*)`;
+                                break;
+                            case 'next_line_after':
+                                generatedPattern = `${wizardValue}\\s*\\n(.+)`;
+                                break;
+                            case 'date_pattern_1':
+                                generatedPattern = `(\\d{1,2})\\/(\\w+)\\/(\\d{4})`;
+                                break;
+                            case 'date_pattern_2':
+                                generatedPattern = `(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})`;
+                                break;
+                            case 'installments_pattern_1':
+                                generatedPattern = `parcela\\s\\d{1,2}\\s*\\/\\s*(\\d{1,2})`;
+                                break;
+                        }
+                        data.pattern = generatedPattern;
+                    }
+                    delete data.wizard_type;
+                    delete data.wizard_value;
                 }
 
                 if (id) {
@@ -1195,8 +1293,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 } else {
                     const fieldToCheck = { 'financeiro_contas': 'accountId', 'financeiro_categorias': 'categoryId', 'financeiro_pessoas': 'personId', 'financeiro_estabelecimentos': 'establishmentId' }[collection];
-                    const snapshot = await this.db.collection('financeiro_lancamentos').where(fieldToCheck, '==', id).limit(1).get();
-                    if (!snapshot.empty) throw new Error(`Este item não pode ser excluído pois possui lançamentos associados.`);
+                    if (fieldToCheck) {
+                        const snapshot = await this.db.collection('financeiro_lancamentos').where(fieldToCheck, '==', id).limit(1).get();
+                        if (!snapshot.empty) throw new Error(`Este item não pode ser excluído pois possui lançamentos associados.`);
+                    }
                     batch.delete(this.db.collection(collection).doc(id));
                 }
                 await batch.commit();
@@ -1399,6 +1499,125 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`;
             this.setupModalEvents();
         },
+        // CORREÇÃO: Função do modal de regras foi criada e implementada com o assistente
+        showOcrRuleModal(ruleId = null) {
+            const isEditing = !!ruleId;
+            const rule = isEditing ? this.state.ocrRules.find(r => r.id === ruleId) : { enabled: true, priority: 10 };
+        
+            const modalHtml = `
+            <div class="modal-content">
+                <form id="ocr-rule-form">
+                    <input type="hidden" name="id" value="${rule?.id || ''}">
+                    <div class="modal-header">
+                        <h2>${isEditing ? 'Editar' : 'Nova'} Regra de OCR</h2>
+                        <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Nome da Regra</label>
+                            <input type="text" name="name" value="${rule?.name || ''}" placeholder="Ex: Data do PicPay" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Tipo de Dado</label>
+                            <select name="type" id="ocr-rule-type" required>
+                                <option value="">Selecione...</option>
+                                <option value="value" ${rule?.type === 'value' ? 'selected' : ''}>Valor</option>
+                                <option value="date" ${rule?.type === 'date' ? 'selected' : ''}>Data</option>
+                                <option value="description" ${rule?.type === 'description' ? 'selected' : ''}>Descrição/Estabelecimento</option>
+                                <option value="installments" ${rule?.type === 'installments' ? 'selected' : ''}>Parcelas</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Modo de Criação do Padrão</label>
+                            <div class="mode-toggle-container">
+                                <button type="button" class="mode-btn active" data-mode="simple">Simples</button>
+                                <button type="button" class="mode-btn" data-mode="advanced">Avançado</button>
+                            </div>
+
+                            <div class="ocr-rule-wizard" id="ocr-wizard-simple">
+                                </div>
+
+                            <div class="ocr-rule-advanced hidden" id="ocr-wizard-advanced">
+                                <textarea name="pattern" rows="3" placeholder="Ex: R\\$\\s*([\\d.,]+)" required>${rule?.pattern || ''}</textarea>
+                            </div>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Use o modo simples para criar regras fáceis ou o avançado para expressões regulares complexas.</p>
+                        </div>
+                        <div class="form-group">
+                            <label>Prioridade</label>
+                            <input type="number" name="priority" value="${rule?.priority || '10'}" required>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Regras com número menor (ex: 1) são testadas antes de regras com número maior (ex: 10).</p>
+                        </div>
+                        <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
+                             <input type="checkbox" name="enabled" id="rule-enabled-checkbox" ${rule?.enabled ? 'checked' : ''} style="width: auto; height: auto; margin: 0; -webkit-appearance: checkbox; -moz-appearance: checkbox; appearance: checkbox;">
+                            <label for="rule-enabled-checkbox" style="margin-bottom: 0; font-weight: normal; color: var(--text-primary);">Regra Ativa</label>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                        <button type="submit" form="ocr-rule-form" class="button-primary">Salvar</button>
+                    </div>
+                </form>
+            </div>`;
+            this.elements.modalContainer.innerHTML = modalHtml;
+            this.setupModalEvents();
+
+            // Lógica do assistente
+            const simpleModeBtn = document.querySelector('.mode-btn[data-mode="simple"]');
+            const advancedModeBtn = document.querySelector('.mode-btn[data-mode="advanced"]');
+            const simpleWizard = document.getElementById('ocr-wizard-simple');
+            const advancedWizard = document.getElementById('ocr-wizard-advanced');
+            const typeSelector = document.getElementById('ocr-rule-type');
+
+            const renderWizardOptions = () => {
+                const type = typeSelector.value;
+                let wizardHtml = '<div class="empty-state" style="padding: 1rem 0"><p>Selecione um tipo de dado para ver as opções.</p></div>';
+
+                if (type === 'description' || type === 'value') {
+                    wizardHtml = `
+                        <div class="wizard-row">
+                            <label><input type="radio" name="wizard_type" value="starts_with" checked>Começa com:</label>
+                            <input type="text" name="wizard_value" placeholder="Ex: Estabelecimento">
+                        </div>
+                        <div class="wizard-row">
+                            <label><input type="radio" name="wizard_type" value="next_line_after">Na linha seguinte a:</label>
+                            <input type="text" name="wizard_value" placeholder="Ex: Para">
+                        </div>
+                    `;
+                } else if (type === 'date') {
+                     wizardHtml = `
+                        <div class="wizard-row">
+                            <label><input type="radio" name="wizard_type" value="date_pattern_1" checked>Formato dd/mês/yyyy</label>
+                        </div>
+                        <div class="wizard-row">
+                            <label><input type="radio" name="wizard_type" value="date_pattern_2">Formato dd/mm/yyyy</label>
+                        </div>
+                    `;
+                } else if (type === 'installments') {
+                     wizardHtml = `
+                        <div class="wizard-row">
+                            <label><input type="radio" name="wizard_type" value="installments_pattern_1" checked>Formato "parcela x/y"</label>
+                        </div>
+                    `;
+                }
+                simpleWizard.innerHTML = wizardHtml;
+            };
+
+            simpleModeBtn.onclick = () => {
+                simpleModeBtn.classList.add('active');
+                advancedModeBtn.classList.remove('active');
+                simpleWizard.classList.remove('hidden');
+                advancedWizard.classList.add('hidden');
+            };
+            advancedModeBtn.onclick = () => {
+                advancedModeBtn.classList.add('active');
+                simpleModeBtn.classList.remove('active');
+                advancedWizard.classList.remove('hidden');
+                simpleWizard.classList.add('hidden');
+            };
+            typeSelector.onchange = renderWizardOptions;
+
+            renderWizardOptions();
+        },
         getGenericModalHtml(formId, title, item = {}, fields = []) {
             return `<div class="modal-content"><form id="${formId}"><input type="hidden" name="id" value="${item.id || ''}"><div class="modal-header"><h2>${item.id ? 'Editar' : 'Novo(a)'} ${title}</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${fields.map(f => `<div class="form-group"><label>${f.label}</label><input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}></div>`).join('')}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="${formId}" class="button-primary">Salvar</button></div></form></div>`;
         },
@@ -1523,6 +1742,10 @@ document.addEventListener('DOMContentLoaded', () => {
         // ======================================================================
         // FUNÇÕES UTILITÁRIAS E GERAIS
         // ======================================================================
+        escapeRegex(string) {
+            if (typeof string !== 'string') return '';
+            return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& means the whole matched string
+        },
         getDateObject(dateFieldValue) {
             if (!dateFieldValue) return new Date();
             if (typeof dateFieldValue.toDate === 'function') return dateFieldValue.toDate();
@@ -1795,6 +2018,33 @@ document.addEventListener('DOMContentLoaded', () => {
         // ======================================================================
         // OCR E ASSOCIAÇÃO
         // ======================================================================
+        async seedDefaultOcrRules() {
+            const defaultRules = [
+                { name: 'Valor Padrão (R$)', type: 'value', pattern: 'R\\$\\s*([\\d.,]+)', priority: 1, enabled: true },
+                { name: 'Data PicPay (dd/mes/yyyy)', type: 'date', pattern: '(\\d{1,2})\\/(\\w+)\\/(\\d{4})', priority: 1, enabled: true },
+                { name: 'Data Willbank (dd/mm/yyyy)', type: 'date', pattern: '(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})', priority: 2, enabled: true },
+                { name: 'Data Nubank (dd MMM yyyy)', type: 'date', pattern: '(\\d{1,2})\\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\\.?\\s+(\\d{4})', priority: 3, enabled: true },
+                { name: 'Estabelecimento PicPay', type: 'description', pattern: 'Local da transação:\\s*\\n(.+)', priority: 1, enabled: true },
+                { name: 'Estabelecimento Nubank', type: 'description', pattern: 'Estabelecimento\\s(.+)', priority: 2, enabled: true },
+                { name: 'Destinatário PIX', type: 'description', pattern: 'Destinatário\\s*\\n(.+)', priority: 3, enabled: true },
+                { name: 'Descrição Genérica (Topo)', type: 'description', pattern: '^([A-Z\\s]{5,50})$', priority: 10, enabled: true },
+                { name: 'Parcelas (x/y)', type: 'installments', pattern: 'parcela\\s\\d{1,2}\\s*\\/\\s*(\\d{1,2})', priority: 1, enabled: true },
+                { name: 'À Vista', type: 'installments', pattern: '(à vista)', priority: 2, enabled: true },
+            ];
+        
+            const batch = this.db.batch();
+            defaultRules.forEach(rule => {
+                const docRef = this.db.collection('financeiro_regras_ocr').doc();
+                batch.set(docRef, rule);
+            });
+        
+            try {
+                await batch.commit();
+                this.showToast('Regras padrão do leitor de comprovantes foram criadas!', 'success');
+            } catch (error) {
+                console.error("Erro ao criar regras padrão de OCR:", error);
+            }
+        },
         launchOcr() {
             const fileInput = document.createElement('input');
             fileInput.type = 'file';
@@ -1835,75 +2085,66 @@ document.addEventListener('DOMContentLoaded', () => {
         parseReceiptText(text) {
             const data = {};
             const lowerCaseText = text.toLowerCase();
+            const typesToExtract = ['value', 'date', 'description', 'installments'];
         
-            // 1. Extrair Valor (Mantém o mesmo, pois é robusto)
-            const valueMatch = lowerCaseText.match(/r\$\s*([\d.,]+)/);
-            if (valueMatch && valueMatch[1]) {
-                data.value = parseFloat(valueMatch[1].replace(/\./g, '').replace(',', '.'));
-            }
+            typesToExtract.forEach(type => {
+                const relevantRules = (this.state.ocrRules || [])
+                    .filter(r => r.type === type && r.enabled)
+                    .sort((a, b) => (a.priority || 99) - (b.priority || 99));
         
-            // 2. Extrair Data (Lógica aprimorada com múltiplos padrões)
-            const monthMap = {
-                jan: '01', janeiro: '01',
-                fev: '02', fevereiro: '02',
-                mar: '03', março: '03',
-                abr: '04', abril: '04',
-                mai: '05', maio: '05',
-                jun: '06', junho: '06',
-                jul: '07', julho: '07',
-                ago: '08', agosto: '08',
-                set: '09', setembro: '09',
-                out: '10', outubro: '10',
-                nov: '11', novembro: '11',
-                dez: '12', dezembro: '12'
-            };
-            const datePatterns = [
-                { regex: /(\d{1,2})\/(\w+)\/(\d{4})/, day: 1, month: 2, year: 3 }, // PicPay: 24/setembro/2025
-                { regex: /(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/, day: 1, month: 2, year: 3 }, // Genérico: 24 de setembro de 2025
-                { regex: /(\d{1,2})\/(\d{1,2})\/(\d{4})/, day: 1, month: 2, year: 3 }, // Willbank: 14/08/2025
-                { regex: /(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})/, day: 1, month: 2, year: 3 } // Nubank: 20 SET 2025
-            ];
+                for (const rule of relevantRules) {
+                    try {
+                        if (data[type]) break;
+
+                        const regex = new RegExp(rule.pattern, 'i');
+                        const match = text.match(regex);
         
-            for (const pattern of datePatterns) {
-                if(data.date) break; // Já encontrou a data, não precisa continuar
-                const dateMatch = lowerCaseText.match(pattern.regex);
-                if (dateMatch) {
-                    const day = dateMatch[pattern.day].padStart(2, '0');
-                    let monthStr = dateMatch[pattern.month].toLowerCase().replace('.', '');
-                    const year = dateMatch[pattern.year];
-                    
-                    const month = monthStr.match(/^\d+$/) ? monthStr.padStart(2, '0') : monthMap[monthStr];
+                        if (match) {
+                            if (type === 'value' && match[1]) {
+                                data.value = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+                            } else if (type === 'description' && match[1]) {
+                                data.description = match[1].trim().split('\n')[0];
+                            } else if (type === 'installments' && match[1]) {
+                                data.installments = rule.name === 'À Vista' ? 1 : parseInt(match[1], 10);
+                            } else if (type === 'date' && match[1] && match[2] && match[3]) {
+                                const day = match[1].padStart(2, '0');
+                                const monthStr = match[2].toLowerCase().replace('.', '');
+                                const year = match[3];
+                                const monthMap = { jan: '01', janeiro: '01', fev: '02', fevereiro: '02', mar: '03', março: '03', abr: '04', abril: '04', mai: '05', maio: '05', jun: '06', junho: '06', jul: '07', julho: '07', ago: '08', agosto: '08', set: '09', setembro: '09', out: '10', outubro: '10', nov: '11', novembro: '11', dez: '12', dezembro: '12' };
+                                const month = monthStr.match(/^\d+$/) ? monthStr.padStart(2, '0') : monthMap[monthStr];
+                                if (day && month && year) {
+                                    data.date = `${year}-${month}-${day}`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`Regra OCR inválida: ${rule.name}`, e);
+                    }
+                }
+            });
         
-                    if (day && month && year) {
-                        data.date = `${year}-${month}-${day}`;
+            for (const account of this.state.accounts) {
+                if (data.accountId) break;
+                if (account.identificadores && account.identificadores.length > 0) {
+                    for (const identifier of account.identificadores) {
+                        if (identifier && lowerCaseText.includes(identifier.toLowerCase())) {
+                            data.accountId = account.id;
+                            break;
+                        }
                     }
                 }
             }
         
-            // 3. Extrair Descrição/Estabelecimento (Nova lógica)
-            const establishmentPatterns = [
-                /local da transação:\s*\n(.+)/i,  // Picpay
-                /estabelecimento\s(.+)/i,          // Nubank
-                /para\s*\n(.+)/i,                   // Nubank PIX
-                /destinatário\s*\n(.+)/i,        // Outro PIX
-            ];
-        
-            for (const pattern of establishmentPatterns) {
-                if(data.description) break; // Já encontrou, não precisa continuar
-                const establishmentMatch = text.match(pattern);
-                if (establishmentMatch && establishmentMatch[1]) {
-                    data.description = establishmentMatch[1].trim().split('\n')[0];
-                }
-            }
-        
-            // Heurística para Willbank e similares (se nenhum padrão acima funcionar)
-            if (!data.description) {
-                const lines = text.split('\n');
-                for (const line of lines) {
-                    const trimmedLine = line.trim();
-                    if (trimmedLine.length >= 5 && trimmedLine.length <= 50 && trimmedLine === trimmedLine.toUpperCase() && !trimmedLine.match(/compra|pagamento|detalhe|willbank|picpay|nubank|crédito|comprovante/i)) {
-                        data.description = trimmedLine;
-                        break;
+            const bankCategoryKeywords = { 'restaurante': ['restaurante', 'ifood', 'lanche', 'alimenta'], 'supermercado': ['supermercado', 'mercado'], 'transporte': ['uber', '99', 'transporte'], 'saúde': ['farmácia', 'drogaria', 'hospital', 'saude'], };
+            for (const categoryName in bankCategoryKeywords) {
+                if (data.categoryId) break;
+                for (const keyword of bankCategoryKeywords[categoryName]) {
+                    if (lowerCaseText.includes(keyword)) {
+                        const matchedCategory = this.state.categories.find(c => c.name.toLowerCase().includes(categoryName));
+                        if (matchedCategory) {
+                            data.categoryId = matchedCategory.id;
+                            break;
+                        }
                     }
                 }
             }
