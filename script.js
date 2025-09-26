@@ -47,7 +47,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 nextMonthBtn: document.getElementById('next-month-btn'),
                 modalContainer: document.getElementById('modal-container'),
                 toastContainer: document.getElementById('toast-container'),
-                loadingOverlay: document.getElementById('loading-overlay'),
                 planningKeydownListener: null
             };
             if (!firebase.apps.length) firebase.initializeApp(this.config.firebase);
@@ -381,6 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="lancar-action-btn" data-action="show-lancar-form" data-form-type="entrada"><i class="fa-solid fa-arrow-up entrada-icon"></i><span>Nova Entrada</span></button>
             <button class="lancar-action-btn" data-action="show-lancar-form" data-form-type="transferencia"><i class="fa-solid fa-right-left" style="color: var(--accent-blue)"></i><span>Transferência</span></button>
             <button class="lancar-action-btn" data-action="show-lancar-form" data-form-type="pagarFatura"><i class="fa-solid fa-file-invoice-dollar" style="color: var(--accent-purple)"></i><span>Pagar Fatura</span></button>
+            <button class="lancar-action-btn" data-action="launch-ocr"><i class="fa-solid fa-camera" style="color: var(--accent-purple);"></i><span>Lançar com Comprovante</span></button>
             </div>
             <div id="form-lancamento-container"></div>`;
         },
@@ -718,6 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
             
             const actionHandlers = {
                 'show-lancar-form': () => this.renderLancamentoForm(actionTarget.dataset.formType),
+                'launch-ocr': () => this.launchOcr(),
                 'cancel-lancar-form': () => {
                     document.getElementById('form-lancamento-container').innerHTML = '';
                     sessionStorage.removeItem('lancamentoFormState');
@@ -893,7 +894,7 @@ document.addEventListener('DOMContentLoaded', () => {
             form.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
                     e.preventDefault();
-                    const fields = Array.from(form.querySelectorAll('input, select')).filter(field => field.offsetParent !== null);
+                    const fields = Array.from(form.querySelectorAll('input:not([type=hidden]), select')).filter(field => field.offsetParent !== null);
                     const currentIndex = fields.indexOf(e.target);
                     const nextField = fields[currentIndex + 1];
                     if (nextField) {
@@ -1810,8 +1811,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 dateStartInput.value = savedFilters.startDate;
                 dateEndInput.value = savedFilters.endDate;
                 typeSelector.value = savedFilters.type;
-                updateItemSelector(); // Popula o seletor de item
-                setTimeout(() => { // Garante que o seletor foi populado antes de setar o valor
+                updateItemSelector();
+                setTimeout(() => { 
                     if (savedFilters.type === 'keyword') {
                         keywordInput.value = savedFilters.keyword;
                     } else {
@@ -1819,10 +1820,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }, 0);
             } else {
-                const today = new Date();
-                const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
-                dateStartInput.value = this.getLocalISODate(firstDayOfYear);
-                dateEndInput.value = this.getLocalISODate(today);
+                const today = this.getLocalISODate();
+                dateStartInput.value = today;
+                dateEndInput.value = today;
                 updateItemSelector();
             }
 
@@ -1957,135 +1957,151 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('export-report-pdf-btn').onclick = () => this.exportReportToPdf();
         },
 
-        exportReportToPdf() {
+        async exportReportToPdf() {
             const exportBtn = document.getElementById('export-report-pdf-btn');
-            if(!exportBtn) return;
+            if(!exportBtn || !this.state.currentReport) return;
             
             const originalBtnContent = exportBtn.innerHTML;
             exportBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`;
             exportBtn.disabled = true;
 
-            // Failsafe timeout in case something goes wrong
             const failsafeTimeout = setTimeout(() => {
                 this.showToast('A geração do PDF demorou demais e foi cancelada.', 'error');
                 exportBtn.innerHTML = originalBtnContent;
                 exportBtn.disabled = false;
-            }, 15000); // 15 seconds
+            }, 15000);
 
-            // Use a timeout to ensure the UI updates to the loading state before heavy processing
-            setTimeout(() => {
-                this.buildAndSavePdf().then(() => {
-                    clearTimeout(failsafeTimeout); // Success, so clear the failsafe
-                }).catch(err => {
-                    clearTimeout(failsafeTimeout);
-                    this.showToast('Ocorreu um erro ao gerar o PDF.', 'error');
-                    console.error("PDF Generation Error:", err);
-                }).finally(() => {
-                    exportBtn.innerHTML = originalBtnContent;
-                    exportBtn.disabled = false;
+            try {
+                // Give the UI a moment to update before heavy processing
+                await new Promise(resolve => setTimeout(resolve, 50));
+
+                const { jsPDF } = window.jspdf;
+                const { transactions, title, summary } = this.state.currentReport;
+                const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+                
+                const addHeaderAndFooter = () => {
+                    const pageCount = doc.internal.getNumberOfPages();
+                    for (let i = 1; i <= pageCount; i++) {
+                        doc.setPage(i);
+                        doc.setFontSize(14);
+                        doc.text(title, 15, 15);
+                        doc.setFontSize(8);
+                        doc.setTextColor(150);
+                        doc.text(`Página ${i} de ${pageCount}`, doc.internal.pageSize.getWidth() - 20, doc.internal.pageSize.getHeight() - 10, { align: 'right' });
+                    }
+                };
+                
+                const tableBody = transactions.map(t => {
+                    const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
+                    const description = t.description || 'N/A';
+                    const account = this.findItemName(t.accountId, 'accounts');
+                    const value = `${t.type === 'Entrada' ? '+' : '-'}${this.formatCurrency(t.value)}`;
+                    return [date, description, account, { content: value, styles: { halign: 'right', textColor: t.type === 'Entrada' ? '#28a745' : '#dc3545' }}];
                 });
-            }, 100);
+
+                const summaryRows = [
+                    ['Total de Entradas:', { content: this.formatCurrency(summary.totalIncome), styles: { halign: 'right', textColor: '#28a745' }}],
+                    ['Total de Saídas:', { content: this.formatCurrency(summary.totalExpense), styles: { halign: 'right', textColor: '#dc3545' }}],
+                    [{ content: 'Saldo Final:', styles: { fontStyle: 'bold' }}, { content: this.formatCurrency(summary.finalBalance), styles: { halign: 'right', fontStyle: 'bold', textColor: summary.finalBalance >= 0 ? '#28a745' : '#dc3545' }}]
+                ];
+
+                doc.autoTable({
+                    head: [['Data', 'Descrição', 'Conta', 'Valor']],
+                    body: tableBody,
+                    startY: 35,
+                    headStyles: { fillColor: [44, 62, 80] },
+                    didDrawPage: (data) => {
+                        if (data.pageNumber === doc.internal.getNumberOfPages()) {
+                             doc.autoTable({
+                                body: summaryRows,
+                                startY: data.cursor.y + 10,
+                                theme: 'plain',
+                                tableWidth: 'wrap',
+                                styles: { cellPadding: 2, fontSize: 11 },
+                                margin: { left: doc.internal.pageSize.getWidth() / 2 }
+                            });
+                        }
+                    }
+                });
+
+                addHeaderAndFooter();
+                
+                const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
+                doc.save(filename);
+            
+            } catch (err) {
+                this.showToast('Erro ao gerar PDF.', 'error');
+                console.error("PDF Generation Error:", err);
+            } finally {
+                clearTimeout(failsafeTimeout);
+                exportBtn.innerHTML = originalBtnContent;
+                exportBtn.disabled = false;
+            }
         },
 
-        async buildAndSavePdf() {
-            const { jsPDF } = window.jspdf;
-            const { transactions, title, summary } = this.state.currentReport;
-            const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-            
-            const margin = 15;
-            const pageWidth = doc.internal.pageSize.getWidth();
-            const pageHeight = doc.internal.pageSize.getHeight();
-            const contentWidth = pageWidth - margin * 2;
-            let y = margin;
+        // ======================================================================
+        // OCR - LANÇAMENTO POR COMPROVANTE
+        // ======================================================================
+        launchOcr() {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'image/png, image/jpeg';
+            fileInput.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
 
-            const addHeader = () => {
-                doc.setFontSize(18);
-                doc.text(title, margin, y);
-                y += 10;
-                
-                doc.setFontSize(10);
-                doc.setTextColor(100);
-                doc.text(`Exibindo ${summary.count} transações.`, margin, y);
-                y += 10;
-            };
+                const ocrButton = document.querySelector('[data-action="launch-ocr"]');
+                const originalBtnHtml = ocrButton.innerHTML;
+                ocrButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>`;
+                ocrButton.disabled = true;
 
-            const addTableHead = () => {
-                doc.setFontSize(10);
-                doc.setFont(undefined, 'bold');
-                doc.text('Data', margin, y);
-                doc.text('Descrição', margin + 25, y);
-                doc.text('Conta', margin + 110, y);
-                doc.text('Valor', contentWidth + margin, y, { align: 'right' });
-                y += 2;
-                doc.line(margin, y, pageWidth - margin, y);
-                y += 8;
-                doc.setFont(undefined, 'normal');
-            };
+                try {
+                    const { data: { text } } = await Tesseract.recognize(file, 'por');
+                    console.log("Texto extraído:", text);
+                    
+                    const extractedData = this.parseNubankPixReceipt(text);
 
-            addHeader();
-            addTableHead();
+                    if (extractedData.value) {
+                        this.showToast('Dados extraídos com sucesso!', 'success');
+                        this.renderLancamentoForm('saida', extractedData);
+                    } else {
+                        this.showToast('Não foi possível extrair os dados. Tente um comprovante mais nítido.', 'error');
+                    }
 
-            transactions.forEach(t => {
-                const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
-                const descriptionLines = doc.splitTextToSize(t.description || 'N/A', 80);
-                const account = this.findItemName(t.accountId, 'accounts');
-                const value = this.formatCurrency(t.value);
-                const isPositive = t.type === 'Entrada';
-                const lineHeight = (Array.isArray(descriptionLines) ? descriptionLines.length * 5 : 5) + 3;
-
-                if (y + lineHeight > pageHeight - margin) {
-                    doc.addPage();
-                    y = margin;
-                    addTableHead();
+                } catch (error) {
+                    console.error("Erro no OCR:", error);
+                    this.showToast('Ocorreu um erro ao ler o comprovante.', 'error');
+                } finally {
+                    ocrButton.innerHTML = originalBtnHtml;
+                    ocrButton.disabled = false;
                 }
-                
-                doc.setTextColor(0, 0, 0);
-                doc.text(date, margin, y);
-                doc.text(descriptionLines, margin + 25, y);
-                doc.text(account, margin + 110, y);
+            };
+            fileInput.click();
+        },
 
-                doc.setTextColor(isPositive ? '#28a745' : '#dc3545');
-                doc.text(`${isPositive ? '+' : ''}${value}`, contentWidth + margin, y, { align: 'right' });
-
-                y += lineHeight;
-            });
-
-            if (y > pageHeight - margin - 30) {
-                doc.addPage();
-                y = margin;
+        parseNubankPixReceipt(text) {
+            const data = {};
+            
+            const valueMatch = text.match(/R\$\s*([\d.,]+)/);
+            if (valueMatch && valueMatch[1]) {
+                data.value = parseFloat(valueMatch[1].replace(/\./g, '').replace(',', '.'));
             }
-            
-            y += 10;
-            doc.setFontSize(11);
-            doc.setFont(undefined, 'bold');
-            doc.text('Resumo do Período', contentWidth - 40, y);
-            y += 8;
-            
-            doc.setFontSize(10);
-            doc.setFont(undefined, 'normal');
-            doc.setTextColor(0, 0, 0);
-            doc.text('Total de Entradas:', contentWidth - 40, y);
-            doc.setTextColor('#28a745');
-            doc.text(this.formatCurrency(summary.totalIncome), contentWidth + margin, y, { align: 'right'});
-            y += 7;
-            
-            doc.setTextColor(0, 0, 0);
-            doc.text('Total de Saídas:', contentWidth - 40, y);
-            doc.setTextColor('#dc3545');
-            doc.text(this.formatCurrency(summary.totalExpense), contentWidth + margin, y, { align: 'right'});
-            y += 2;
-            doc.line(contentWidth - 40, y, contentWidth + margin, y);
-            y += 7;
-            
-            doc.setFont(undefined, 'bold');
-            doc.setTextColor(0, 0, 0);
-            doc.text('Saldo Final:', contentWidth - 40, y);
-            doc.setTextColor(summary.finalBalance >= 0 ? '#28a745' : '#dc3545');
-            doc.text(this.formatCurrency(summary.finalBalance), contentWidth + margin, y, { align: 'right'});
 
-            const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
-            doc.save(filename);
-        }
+            const dateMatch = text.match(/(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})/i);
+            if (dateMatch) {
+                const day = dateMatch[1];
+                const monthStr = dateMatch[2].toLowerCase().replace('.', '');
+                const year = dateMatch[3];
+                const monthMap = { jan: 0, fev: 1, mar: 2, abr: 3, mai: 4, jun: 5, jul: 6, ago: 7, set: 8, out: 9, nov: 10, dez: 11 };
+                const month = monthMap[monthStr];
+                
+                if (day && month !== undefined && year) {
+                    data.date = new Date(year, month, day).toISOString().split('T')[0];
+                }
+            }
+
+            return data;
+        },
     };
 
     App.init();
