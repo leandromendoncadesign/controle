@@ -760,6 +760,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'person-form': () => this.saveItem(e, 'financeiro_pessoas', 'Pessoa'),
                 'establishment-form': () => this.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento'),
                 'transaction-form': () => this.saveTransaction(form, true),
+                'installment-form': () => this.saveInstallmentEdit(form),
                 'lancar-form': () => this.saveTransaction(form),
                 'filter-form': () => {
                     const formData = new FormData(form);
@@ -926,6 +927,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 data.value = parseFloat(String(data.value).replace(',', '.')) || 0;
                 if (data.value <= 0) throw new Error("O valor deve ser positivo.");
                 const dateString = data.date;
+
+                if (type === 'saida' && !isEdit) {
+                    const dateObj = new Date(dateString + 'T12:00:00');
+                    const sameDayTransactions = this.state.allTransactions.filter(t =>
+                        t.accountId === data.accountId &&
+                        this.getDateObject(t.date).toDateString() === dateObj.toDateString() &&
+                        t.value === data.value
+                    );
+                    if (sameDayTransactions.length > 0) {
+                        if (!confirm("Atenção: Este lançamento parece ser uma duplicata de um já existente. Deseja salvá-lo mesmo assim?")) {
+                            throw new Error("Operação cancelada pelo usuário.");
+                        }
+                    }
+                }
+
                 if (type === 'transferencia') {
                     if (data.sourceAccountId === data.destinationAccountId) throw new Error("A conta de origem e destino não podem ser a mesma.");
                     const transferId = this.db.collection('financeiro_lancamentos').doc().id;
@@ -1000,7 +1016,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             } catch (error) {
                 console.error("Erro ao salvar lançamento:", error);
-                this.showToast(error.message || 'Ocorreu um erro ao salvar.', 'error');
+                if (error.message !== "Operação cancelada pelo usuário.") {
+                    this.showToast(error.message || 'Ocorreu um erro ao salvar.', 'error');
+                }
             } finally {
                 if (submitButton) {
                     submitButton.disabled = false;
@@ -1055,7 +1073,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         },
         async deleteItem(collection, id, itemName, transactionToDelete = null) {
-            if (!confirm(`Tem certeza que deseja excluir: ${itemName}? Esta ação não pode ser desfeita.`)) return;
+            let confirmationMessage = `Tem certeza que deseja excluir: ${itemName}? Esta ação não pode ser desfeita.`;
+            if (transactionToDelete?.installmentGroupId) {
+                confirmationMessage = 'Este é um lançamento parcelado. Deseja excluir TODAS as parcelas relacionadas?';
+            }
+
+            if (!confirm(confirmationMessage)) return;
+
             const batch = this.db.batch();
             try {
                 if (collection === 'financeiro_lancamentos') {
@@ -1067,7 +1091,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         const querySnapshot = await this.db.collection(collection).where('paymentId', '==', transactionToDelete.paymentId).get();
                         querySnapshot.docs.forEach(doc => transactionsToDelete.push({ id: doc.id, ...doc.data() }));
                     } else if (transactionToDelete?.installmentGroupId) {
-                        if (!confirm('Este é um lançamento parcelado. Deseja excluir TODAS as parcelas relacionadas?')) return;
                         const querySnapshot = await this.db.collection(collection).where('installmentGroupId', '==', transactionToDelete.installmentGroupId).get();
                         querySnapshot.docs.forEach(doc => transactionsToDelete.push({ id: doc.id, ...doc.data() }));
                     } else if (transactionToDelete) {
@@ -1081,7 +1104,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     for (const trans of transactionsToDelete) {
                         if (trans && trans.id) {
                             batch.delete(this.db.collection(collection).doc(trans.id));
-                            this.updateAccountBalance(trans.accountId, trans.value, trans.type, true, batch);
+                            if (trans.type === 'Saída' || trans.type === 'Entrada') {
+                                this.updateAccountBalance(trans.accountId, trans.value, trans.type, true, batch);
+                            }
                         }
                     }
                 } else {
@@ -1253,7 +1278,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const personName = transaction.personId ? this.findItemName(transaction.personId, 'people') : null;
             const establishmentName = transaction.establishmentId ? this.findItemName(transaction.establishmentId, 'establishments') : null;
 
-            const canBeModified = !transaction.paymentId && !transaction.installmentGroupId && transaction.type !== 'Pagamento de Fatura' && transaction.type !== 'Transferência';
+            const canBeModified = transaction.type !== 'Pagamento de Fatura' && transaction.type !== 'Transferência';
 
             const modalHtml = `
             <div class="modal-content">
@@ -1286,10 +1311,16 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         showTransactionModal(transactionId) {
             const transaction = transactionId ? this.state.allTransactions.find(t => t.id === transactionId) : {};
-            if (!transaction?.id || transaction.paymentId || transaction.installmentGroupId || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência') {
+            if (!transaction?.id || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência') {
                 this.showToast("Este tipo de lançamento não pode ser editado.", "error");
                 return;
             }
+
+            if (transaction.installmentGroupId) {
+                this.showInstallmentEditModal(transaction);
+                return;
+            }
+
             const getOptions = (items = [], selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
             const dateInputValue = transaction.date ? this.getLocalISODate(this.getDateObject(transaction.date)) : this.getLocalISODate();
             let formFieldsHtml = `
@@ -1889,43 +1920,45 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('export-report-pdf-btn').onclick = () => this.exportReportToPdf();
         },
 
-        exportReportToPdf() {
+        async exportReportToPdf() {
             const { jsPDF } = window.jspdf;
             const exportBtn = document.getElementById('export-report-pdf-btn');
             const { transactions, title, summary } = this.state.currentReport;
-
+        
             if (!exportBtn || !transactions) return;
-
+        
             const originalBtnContent = exportBtn.innerHTML;
             exportBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`;
             exportBtn.disabled = true;
-            
+        
+            // Fail-safe timeout
             const failsafeTimeout = setTimeout(() => {
                 this.showToast('A geração do PDF demorou demais e foi cancelada.', 'error');
                 exportBtn.innerHTML = originalBtnContent;
                 exportBtn.disabled = false;
-            }, 15000); // 15 segundos de tempo limite
-
-            // Usamos um pequeno timeout para garantir que a UI atualize antes do processamento pesado
-            setTimeout(() => {
-                try {
-                    const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
-                    const margin = 15;
-                    const pageWidth = doc.internal.pageSize.getWidth();
-                    const pageHeight = doc.internal.pageSize.getHeight();
-                    const contentWidth = pageWidth - margin * 2;
-                    let y = margin;
-                    
-                    doc.setFontSize(18);
-                    doc.text(title, margin, y);
-                    y += 10;
-                    
-                    doc.setFontSize(10);
-                    doc.setTextColor(100);
-                    doc.text(`Exibindo ${summary.count} transações.`, margin, y);
-                    y += 10;
-
-                    // Cabeçalho da Tabela
+            }, 15000);
+        
+            try {
+                // Give the UI a moment to update
+                await new Promise(resolve => setTimeout(resolve, 50));
+        
+                const doc = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+                const margin = 15;
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const contentWidth = pageWidth - margin * 2;
+                let y = margin;
+        
+                doc.setFontSize(18);
+                doc.text(title, margin, y);
+                y += 10;
+        
+                doc.setFontSize(10);
+                doc.setTextColor(100);
+                doc.text(`Exibindo ${summary.count} transações.`, margin, y);
+                y += 10;
+        
+                const drawHeader = () => {
                     doc.setFontSize(10);
                     doc.setFont(undefined, 'bold');
                     doc.text('Data', margin, y);
@@ -1935,91 +1968,83 @@ document.addEventListener('DOMContentLoaded', () => {
                     y += 2;
                     doc.line(margin, y, pageWidth - margin, y);
                     y += 8;
-
                     doc.setFont(undefined, 'normal');
-                    transactions.forEach(t => {
-                        if (y > pageHeight - margin - 20) { // Verifica se há espaço para mais uma linha + resumo
-                            doc.addPage();
-                            y = margin;
-                            // Redesenha cabeçalho na nova página
-                            doc.setFontSize(10);
-                            doc.setFont(undefined, 'bold');
-                            doc.text('Data', margin, y);
-                            doc.text('Descrição', margin + 25, y);
-                            doc.text('Conta', margin + 110, y);
-                            doc.text('Valor', contentWidth + margin, y, { align: 'right' });
-                            y += 2;
-                            doc.line(margin, y, pageWidth - margin, y);
-                            y += 8;
-                            doc.setFont(undefined, 'normal');
-                        }
-                        
-                        const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
-                        const description = doc.splitTextToSize(t.description || 'N/A', 80); // Quebra de linha
-                        const account = this.findItemName(t.accountId, 'accounts');
-                        const value = this.formatCurrency(t.value);
-                        const isPositive = t.type === 'Entrada';
-                        
-                        doc.setTextColor(0, 0, 0);
-                        doc.text(date, margin, y);
-                        doc.text(description, margin + 25, y);
-                        doc.text(account, margin + 110, y);
+                };
+        
+                drawHeader();
+        
+                transactions.forEach(t => {
+                    const date = this.getDateObject(t.date).toLocaleDateString('pt-BR');
+                    const description = doc.splitTextToSize(t.description || 'N/A', 80);
+                    const account = this.findItemName(t.accountId, 'accounts');
+                    const value = this.formatCurrency(t.value);
+                    const isPositive = t.type === 'Entrada';
+                    const lineHeight = (Array.isArray(description) ? description.length * 5 : 5) + 3;
 
-                        doc.setTextColor(isPositive ? '#28a745' : '#dc3545');
-                        doc.text(`${isPositive ? '+' : ''}${value}`, contentWidth + margin, y, { align: 'right' });
-
-                        y += (Array.isArray(description) ? description.length * 5 : 5) + 3; // Aumenta o y
-                    });
-                    
-                    // Resumo Final
-                    y += 10;
-                    if (y > pageHeight - margin - 30) {
+                    if (y + lineHeight > pageHeight - margin) {
                         doc.addPage();
                         y = margin;
+                        drawHeader();
                     }
                     
-                    doc.setFontSize(11);
-                    doc.setFont(undefined, 'bold');
-                    doc.text('Resumo do Período', contentWidth - 40, y);
-                    y += 8;
-                    
-                    doc.setFontSize(10);
-                    doc.setFont(undefined, 'normal');
                     doc.setTextColor(0, 0, 0);
-                    doc.text('Total de Entradas:', contentWidth - 40, y);
-                    doc.setTextColor('#28a745');
-                    doc.text(this.formatCurrency(summary.totalIncome), contentWidth + margin, y, { align: 'right'});
-                    y += 7;
-                    
-                    doc.setTextColor(0, 0, 0);
-                    doc.text('Total de Saídas:', contentWidth - 40, y);
-                    doc.setTextColor('#dc3545');
-                    doc.text(this.formatCurrency(summary.totalExpense), contentWidth + margin, y, { align: 'right'});
-                    y += 2;
-                    doc.line(contentWidth - 40, y, contentWidth + margin, y);
-                    y += 7;
-                    
-                    doc.setFont(undefined, 'bold');
-                    doc.setTextColor(0, 0, 0);
-                    doc.text('Saldo Final:', contentWidth - 40, y);
-                    doc.setTextColor(summary.finalBalance >= 0 ? '#28a745' : '#dc3545');
-                    doc.text(this.formatCurrency(summary.finalBalance), contentWidth + margin, y, { align: 'right'});
-
-                    const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
-                    doc.save(filename);
-                    
-                } catch(err) {
-                    this.showToast('Erro ao gerar PDF.', 'error');
-                    console.error(err);
-                } finally {
-                    clearTimeout(failsafeTimeout);
-                    exportBtn.innerHTML = originalBtnContent;
-                    exportBtn.disabled = false;
+                    doc.text(date, margin, y);
+                    doc.text(description, margin + 25, y);
+                    doc.text(account, margin + 110, y);
+        
+                    doc.setTextColor(isPositive ? '#28a745' : '#dc3545');
+                    doc.text(`${isPositive ? '+' : ''}${value}`, contentWidth + margin, y, { align: 'right'});
+        
+                    y += lineHeight;
+                });
+        
+                if (y > pageHeight - margin - 30) {
+                    doc.addPage();
+                    y = margin;
                 }
-            }, 100);
+                
+                y += 10;
+                doc.setFontSize(11);
+                doc.setFont(undefined, 'bold');
+                doc.text('Resumo do Período', contentWidth - 40, y);
+                y += 8;
+        
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.setTextColor(0, 0, 0);
+                doc.text('Total de Entradas:', contentWidth - 40, y);
+                doc.setTextColor('#28a745');
+                doc.text(this.formatCurrency(summary.totalIncome), contentWidth + margin, y, { align: 'right'});
+                y += 7;
+        
+                doc.setTextColor(0, 0, 0);
+                doc.text('Total de Saídas:', contentWidth - 40, y);
+                doc.setTextColor('#dc3545');
+                doc.text(this.formatCurrency(summary.totalExpense), contentWidth + margin, y, { align: 'right'});
+                y += 2;
+                doc.line(contentWidth - 40, y, contentWidth + margin, y);
+                y += 7;
+        
+                doc.setFont(undefined, 'bold');
+                doc.setTextColor(0, 0, 0);
+                doc.text('Saldo Final:', contentWidth - 40, y);
+                doc.setTextColor(summary.finalBalance >= 0 ? '#28a745' : '#dc3545');
+                doc.text(this.formatCurrency(summary.finalBalance), contentWidth + margin, y, { align: 'right'});
+
+                const filename = `${title.replace(/[^\w\s]/gi, '').replace(/ /g, '_').toLowerCase()}.pdf`;
+                doc.save(filename);
+        
+            } catch(err) {
+                this.showToast('Erro ao gerar PDF.', 'error');
+                console.error(err);
+            } finally {
+                clearTimeout(failsafeTimeout);
+                exportBtn.innerHTML = originalBtnContent;
+                exportBtn.disabled = false;
+            }
         }
     };
 
     App.init();
     window.App = App;
-});,
+});
