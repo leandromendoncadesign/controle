@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', () => {
             categories: [],
             people: [],
             establishments: [],
+            associations: [],
             listeners: [],
             charts: {},
             isLoading: true,
@@ -173,6 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'financeiro_categorias': 'categories',
                 'financeiro_pessoas': 'people',
                 'financeiro_estabelecimentos': 'establishments',
+                'financeiro_associacoes': 'associations'
             };
             const promises = Object.entries(collections).map(([col, stateKey]) =>
                 new Promise(resolve => {
@@ -442,7 +444,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const getItemsHtml = (items, type, icon) => {
                 if (!items || items.length === 0) return `<div class="empty-state" style="padding: 20px 0;">Nenhum item cadastrado.</div>`;
                 return items
-                    .filter(item => !!item)
+                    .filter(item => !!item && !!item.name) // CORREÇÃO: Garante que o item existe e tem um nome antes de ordenar
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(item => `
                     <div class="item-list-row">
@@ -743,6 +745,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'add-category': () => this.showCategoryModal(), 'edit-category': () => this.showCategoryModal(id), 'delete-category': () => this.deleteItem('financeiro_categorias', id, 'Categoria'),
                 'add-person': () => this.showPersonModal(), 'edit-person': () => this.showPersonModal(id), 'delete-person': () => this.deleteItem('financeiro_pessoas', id, 'Pessoa'),
                 'add-establishment': () => this.showEstablishmentModal(), 'edit-establishment': () => this.showEstablishmentModal(id), 'delete-establishment': () => this.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
+                'show-association-modal': () => this.showAssociationModal(actionTarget.dataset.description),
             };
 
             if (actionHandlers[action]) {
@@ -761,6 +764,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'category-form': () => this.saveItem(e, 'financeiro_categorias', 'Categoria'),
                 'person-form': () => this.saveItem(e, 'financeiro_pessoas', 'Pessoa'),
                 'establishment-form': () => this.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento'),
+                'association-form': () => this.saveAssociation(form),
                 'transaction-form': () => this.saveTransaction(form, true),
                 'installment-form': () => this.saveInstallmentEdit(form),
                 'anticipate-installments-form': () => this.anticipateInstallments(form),
@@ -796,15 +800,89 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.debouncedSavePlanning();
                 return;
             }
-            const lancarInput = e.target.closest('#lancar-form input, #lancar-form select');
-            if (lancarInput) {
-                const form = lancarInput.closest('form');
-                const formData = new FormData(form);
+
+            const lancarForm = e.target.closest('#lancar-form');
+            if (lancarForm) {
+                const formData = new FormData(lancarForm);
                 const formState = Object.fromEntries(formData.entries());
-                formState.formType = form.dataset.type;
+                formState.formType = lancarForm.dataset.type;
                 sessionStorage.setItem('lancamentoFormState', JSON.stringify(formState));
+
+                if (e.target.name === 'description') {
+                    this.handleDescriptionChange(e.target.value, lancarForm);
+                }
             }
         },
+
+        handleDescriptionChange(description, form) {
+            const establishmentSelect = form.querySelector('select[name="establishmentId"]');
+            const associationContainer = form.querySelector('#association-helper-container');
+            const descriptionInput = form.querySelector('input[name="description"]');
+        
+            if (!establishmentSelect || !associationContainer || !descriptionInput) return;
+        
+            const normalizedText = description.trim().toLowerCase();
+            associationContainer.innerHTML = '';
+        
+            if (!normalizedText) {
+                establishmentSelect.value = '';
+                return;
+            }
+        
+            // Prioridade 1: Associação direta
+            const association = this.state.associations.find(a => a.textoOcr === normalizedText);
+            if (association) {
+                const establishment = this.state.establishments.find(e => e.id === association.entidadeId);
+                if (establishment) {
+                    descriptionInput.value = establishment.name;
+                    establishmentSelect.value = establishment.id;
+                    this.handleEstablishmentChange(establishment.id, form);
+                    return;
+                }
+            }
+        
+            // Prioridade 2: Apelidos/Aliases dos estabelecimentos
+            for (const establishment of this.state.establishments) {
+                if (establishment.aliases && establishment.aliases.length > 0) {
+                    for (const alias of establishment.aliases) {
+                        if (alias && normalizedText.includes(alias)) {
+                            descriptionInput.value = establishment.name;
+                            establishmentSelect.value = establishment.id;
+                            this.handleEstablishmentChange(establishment.id, form);
+                            return;
+                        }
+                    }
+                }
+            }
+        
+            // Prioridade 3: Nome Fantasia direto
+            const directMatch = this.state.establishments.find(e => e.name.trim().toLowerCase() === normalizedText);
+            if (directMatch) {
+                descriptionInput.value = directMatch.name;
+                establishmentSelect.value = directMatch.id;
+                this.handleEstablishmentChange(directMatch.id, form);
+                return;
+            }
+        
+            // Fallback: Oferecer para criar associação
+            establishmentSelect.value = '';
+            if (this.state.establishments.length > 0) {
+                associationContainer.innerHTML = `<button type="button" class="button-secondary" data-action="show-association-modal" data-description="${description.trim()}" style="width: 100%; margin-top: 8px;"><i class="fa-solid fa-link"></i> Associar "${description.trim()}" a um estabelecimento?</button>`;
+            }
+        },
+
+        handleEstablishmentChange(establishmentId, form) {
+            const categorySelect = form.querySelector('select[name="categoryId"]');
+            if (!establishmentId || !categorySelect) return;
+        
+            const establishment = this.state.establishments.find(e => e.id === establishmentId);
+            if (establishment && establishment.categoriaPadraoId) {
+                if (!categorySelect.value) {
+                    categorySelect.value = establishment.categoriaPadraoId;
+                }
+            }
+        },
+
         handleSaveOnChange(e) {
             const checkbox = e.target.closest('.planning-item-checkbox');
             if (checkbox && this.state.currentView === 'planning') {
@@ -825,6 +903,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 const selectedAccount = this.state.accounts.find(a => a.id === e.target.value);
                 const showInstallments = selectedAccount?.type === 'Cartão de Crédito';
                 installmentsGroup.classList.toggle('hidden', !showInstallments);
+            }
+            if (e.target.name === 'establishmentId') {
+                const form = e.target.closest('form');
+                this.handleEstablishmentChange(e.target.value, form);
             }
         },
         getTransactionHtml(transaction, showAccount = true) {
@@ -873,7 +955,7 @@ document.addEventListener('DOMContentLoaded', () => {
             switch (type) {
                 case 'saida':
                     title = 'Nova Saída';
-                    formHtml = `<div class="form-group"><label>Descrição</label><input type="text" name="description" value="${prefill('description')}" required></div><div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" placeholder="0,00" value="${prefill('value')}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Conta / Cartão</label><select id="lancar-saida-account" name="accountId" required><option value="">Selecione...</option>${getOptions(accounts, prefill('accountId'))}</select></div><div id="installments-group" class="form-group hidden"><label>Número de Parcelas</label><input type="number" inputmode="numeric" name="installments" min="1" value="${prefill('installments') || '1'}"></div><div class="form-group"><label>Categoria</label><select name="categoryId" required><option value="">Selecione...</option>${getOptions(this.state.categories, prefill('categoryId'))}</select></div><div class="form-group"><label>Pessoa (Opcional)</label><select name="personId"><option value="">Nenhuma</option>${getOptions(this.state.people, prefill('personId'))}</select></div><div class="form-group"><label>Estabelecimento (Opcional)</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(this.state.establishments, prefill('establishmentId'))}</select></div>`;
+                    formHtml = `<div class="form-group"><label>Descrição</label><input type="text" name="description" value="${prefill('description')}" required></div><div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" placeholder="0,00" value="${prefill('value')}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Conta / Cartão</label><select id="lancar-saida-account" name="accountId" required><option value="">Selecione...</option>${getOptions(accounts, prefill('accountId'))}</select></div><div id="installments-group" class="form-group hidden"><label>Número de Parcelas</label><input type="number" inputmode="numeric" name="installments" min="1" value="${prefill('installments') || '1'}"></div><div class="form-group"><label>Categoria</label><select name="categoryId" required><option value="">Selecione...</option>${getOptions(this.state.categories, prefill('categoryId'))}</select></div><div class="form-group"><label>Pessoa (Opcional)</label><select name="personId"><option value="">Nenhuma</option>${getOptions(this.state.people, prefill('personId'))}</select></div><div class="form-group"><label>Estabelecimento (Opcional)</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(this.state.establishments, prefill('establishmentId'))}</select><div id="association-helper-container"></div></div>`;
                     break;
                 case 'entrada':
                     title = 'Nova Entrada';
@@ -904,6 +986,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
             });
+
+            if (prefillData.description) {
+                this.handleDescriptionChange(prefillData.description, form);
+            }
         },
         async saveTransaction(form, isEdit = false) {
             const formData = new FormData(form);
@@ -1030,6 +1116,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = Object.fromEntries(formData.entries());
                 const id = data.id;
                 delete data.id;
+                
                 if (itemName === 'Conta') {
                     if (data.type === 'Cartão de Crédito') {
                         data.limit = parseFloat(String(data.limit).replace(',', '.')) || 0;
@@ -1042,8 +1129,14 @@ document.addEventListener('DOMContentLoaded', () => {
                         delete data.dueDate;
                         delete data.closingDay;
                     }
+                    data.identificadores = data.identificadores.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
                 }
-                console.log(`Salvando ${itemName}:`, data);
+
+                if (itemName === 'Estabelecimento') {
+                    data.categoriaPadraoId = data.categoriaPadraoId || '';
+                    data.aliases = data.aliases.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                }
+
                 if (id) {
                     await this.db.collection(collection).doc(id).update(data);
                 } else {
@@ -1124,6 +1217,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const isEditing = !!accountId;
             const account = isEditing ? this.state.accounts.find(a => a.id === accountId) : {};
             const accountColor = account?.color || '#007aff';
+            const identificadores = account?.identificadores ? account.identificadores.join(', ') : '';
+        
             this.elements.modalContainer.innerHTML = `
             <div class="modal-content">
             <form id="account-form">
@@ -1133,55 +1228,69 @@ document.addEventListener('DOMContentLoaded', () => {
             <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
             </div>
             <div class="modal-body">
-            <div class="form-group">
-            <label>Nome</label>
-            <input type="text" name="name" value="${account?.name || ''}" required>
-            </div>
-            <div class="form-group">
-            <label>Tipo</label>
-            <select name="type" id="account-type">
-            <option value="Conta Corrente" ${account?.type === 'Conta Corrente' ? 'selected' : ''}>Conta Corrente</option>
-            <option value="Cartão de Crédito" ${account?.type === 'Cartão de Crédito' ? 'selected' : ''}>Cartão de Crédito</option>
-            </select>
-            </div>
-            <div class="form-group color-picker">
-            <label>Cor</label>
-            <input type="color" name="color" value="${accountColor}">
-            </div>
-            <div class="form-group" id="balance-limit-group">
-            <label>Saldo Inicial</label>
-            <div class="input-group-currency">
-            <span class="currency-symbol">R$</span>
-            <input type="number" step="0.01" name="balance" value="${account?.balance || ''}" placeholder="0,00">
-            </div>
-            </div>
-            <div id="credit-card-fields" class="hidden">
-            <div class="form-group">
-            <label>Dia do Vencimento</label>
-            <input type="number" min="1" max="31" name="dueDate" value="${account?.dueDate || ''}">
-            </div>
-            <div class="form-group">
-            <label>Dia do Fechamento</label>
-            <input type="number" min="1" max="31" name="closingDay" value="${account?.closingDay || ''}">
-            </div>
-            </div>
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" name="name" value="${account?.name || ''}" required>
+                </div>
+                <div class="form-group">
+                    <label>Tipo</label>
+                    <select name="type" id="account-type">
+                        <option value="Conta Corrente" ${account?.type === 'Conta Corrente' ? 'selected' : ''}>Conta Corrente</option>
+                        <option value="Cartão de Crédito" ${account?.type === 'Cartão de Crédito' ? 'selected' : ''}>Cartão de Crédito</option>
+                    </select>
+                </div>
+                <div class="form-group color-picker">
+                    <label>Cor</label>
+                    <input type="color" name="color" value="${accountColor}">
+                </div>
+                <div class="form-group" id="balance-limit-group"></div>
+                <div id="credit-card-fields" class="hidden">
+                    <div class="form-group">
+                        <label>Dia do Vencimento</label>
+                        <input type="number" min="1" max="31" name="dueDate" value="${account?.dueDate || ''}">
+                    </div>
+                    <div class="form-group">
+                        <label>Dia do Fechamento</label>
+                        <input type="number" min="1" max="31" name="closingDay" value="${account?.closingDay || ''}">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="identificadores">Identificadores (para OCR)</label>
+                    <input type="text" name="identificadores" value="${identificadores}" placeholder="Ex: nubank, roxinho, final 1234">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Palavras-chave separadas por vírgula para o sistema reconhecer esta conta.</p>
+                </div>
             </div>
             <div class="modal-actions">
-            <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
-            <button type="submit" form="account-form" class="button-primary">Salvar</button>
+                <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                <button type="submit" form="account-form" class="button-primary">Salvar</button>
             </div>
             </form>
             </div>`;
+            
             const selector = document.getElementById('account-type');
+            const balanceLimitGroup = document.getElementById('balance-limit-group');
+        
             const toggleFields = () => {
                 const isCredit = selector.value === 'Cartão de Crédito';
                 document.getElementById('credit-card-fields').classList.toggle('hidden', !isCredit);
-                const balanceGroup = document.getElementById('balance-limit-group');
-                balanceGroup.querySelector('label').textContent = isCredit ? 'Limite do Cartão' : 'Saldo Inicial';
-                const input = balanceGroup.querySelector('input');
-                input.name = isCredit ? 'limit' : 'balance';
-                input.value = (isCredit ? account?.limit : account?.balance) || '';
+                
+                if (isCredit) {
+                    balanceLimitGroup.innerHTML = `
+                        <label>Limite do Cartão</label>
+                        <div class="input-group-currency">
+                            <span class="currency-symbol">R$</span>
+                            <input type="number" step="0.01" name="limit" value="${account?.limit || ''}" placeholder="0,00">
+                        </div>`;
+                } else {
+                    balanceLimitGroup.innerHTML = `
+                        <label>Saldo Inicial</label>
+                        <div class="input-group-currency">
+                            <span class="currency-symbol">R$</span>
+                            <input type="number" step="0.01" name="balance" value="${account?.balance || ''}" placeholder="0,00" ${isEditing ? 'disabled' : ''}>
+                        </div>`;
+                }
             };
+        
             toggleFields();
             selector.onchange = toggleFields;
             this.setupModalEvents();
@@ -1248,7 +1357,46 @@ document.addEventListener('DOMContentLoaded', () => {
         },
         showEstablishmentModal(establishmentId = null) {
             const establishment = establishmentId ? this.state.establishments.find(e => e.id === establishmentId) : {};
-            this.elements.modalContainer.innerHTML = this.getGenericModalHtml('establishment-form', 'Estabelecimento', establishment, [{ label: 'Nome', name: 'name', type: 'text', required: true }]);
+            const categoryOptions = this.state.categories
+                .sort((a,b) => a.name.localeCompare(b.name))
+                .map(cat => `<option value="${cat.id}" ${establishment?.categoriaPadraoId === cat.id ? 'selected' : ''}>${cat.name}</option>`)
+                .join('');
+            const aliases = establishment?.aliases ? establishment.aliases.join(', ') : '';
+        
+            const fieldsHtml = `
+                <div class="form-group">
+                    <label>Nome</label>
+                    <input type="text" name="name" value="${establishment.name || ''}" required>
+                </div>
+                <div class="form-group">
+                    <label>Categoria Padrão (Opcional)</label>
+                    <select name="categoriaPadraoId">
+                        <option value="">Nenhuma</option>
+                        ${categoryOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Apelidos/Nomes Alternativos (CNPJ)</label>
+                    <input type="text" name="aliases" value="${aliases}" placeholder="Ex: panificadora silva, cnpj 12.345...">
+                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Nomes alternativos (separados por vírgula) que aparecem em comprovantes.</p>
+                </div>
+            `;
+        
+            this.elements.modalContainer.innerHTML = `
+                <div class="modal-content">
+                    <form id="establishment-form">
+                        <input type="hidden" name="id" value="${establishment.id || ''}">
+                        <div class="modal-header">
+                            <h2>${establishment.id ? 'Editar' : 'Novo'} Estabelecimento</h2>
+                            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+                        </div>
+                        <div class="modal-body">${fieldsHtml}</div>
+                        <div class="modal-actions">
+                            <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                            <button type="submit" form="establishment-form" class="button-primary">Salvar</button>
+                        </div>
+                    </form>
+                </div>`;
             this.setupModalEvents();
         },
         getGenericModalHtml(formId, title, item = {}, fields = []) {
@@ -1371,6 +1519,65 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.closeModalTimeout = null;
             }, 300);
         },
+        
+        // ======================================================================
+        // FUNÇÕES UTILITÁRIAS E GERAIS
+        // ======================================================================
+        getDateObject(dateFieldValue) {
+            if (!dateFieldValue) return new Date();
+            if (typeof dateFieldValue.toDate === 'function') return dateFieldValue.toDate();
+            return new Date(dateFieldValue);
+        },
+        getLocalISODate(date = new Date()) {
+            return new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString().split("T")[0];
+        },
+        getDateFromMonthYear(monthYear) {
+            const [month, year] = monthYear.split('-');
+            return new Date(year, month - 1, 15);
+        },
+        getInvoiceKeyForDate(date, card) {
+            if (!date || !card || !card.closingDay) return '';
+            
+            const transactionDate = this.getDateObject(date);
+            let invoiceYear = transactionDate.getFullYear();
+            let invoiceMonth = transactionDate.getMonth() + 1; 
+
+            if (transactionDate.getDate() > card.closingDay) {
+                invoiceMonth += 1;
+                if (invoiceMonth > 12) {
+                    invoiceMonth = 1;
+                    invoiceYear += 1;
+                }
+            }
+            
+            return `${invoiceMonth.toString().padStart(2, '0')}-${invoiceYear}`;
+        },
+        capitalizeFirstLetter(string) { return string ? string.charAt(0).toUpperCase() + string.slice(1) : ''; },
+        formatCurrency(value) { return (parseFloat(value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); },
+        getContrastColor(hexColor) {
+            if (!hexColor || hexColor.length < 7) return '#FFFFFF';
+            const r = parseInt(hexColor.substr(1, 2), 16);
+            const g = parseInt(hexColor.substr(3, 2), 16);
+            const b = parseInt(hexColor.substr(5, 2), 16);
+            return ((r * 299) + (g * 587) + (b * 114)) / 1000 >= 128 ? '#000000' : '#FFFFFF';
+        },
+        findItemName(id, collectionName) {
+            const collection = this.state[collectionName] || [];
+            const item = collection.find(c => c && c.id === id);
+            return item ? item.name : 'N/A';
+        },
+        showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-check-circle' : 'fa-times-circle'}"></i> ${message}`;
+            this.elements.toastContainer.appendChild(toast);
+            setTimeout(() => toast.classList.add('show'), 10);
+            setTimeout(() => { toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove()); }, 4000);
+        },
+        
+        // ======================================================================
+        // SEÇÕES ESPECÍFICAS (Gráficos, Faturas, etc.)
+        // ======================================================================
         createDashboardChart(transactions) {
             const ctx = document.getElementById('dashboard-chart');
             if (!ctx) return;
@@ -1497,57 +1704,6 @@ document.addEventListener('DOMContentLoaded', () => {
             periodSelector.onchange = renderInvoice;
             renderInvoice();
         },
-        getDateObject(dateFieldValue) {
-            if (!dateFieldValue) return new Date();
-            if (typeof dateFieldValue.toDate === 'function') return dateFieldValue.toDate();
-            return new Date(dateFieldValue);
-        },
-        getLocalISODate(date = new Date()) {
-            return new Date(date.getTime() - (date.getTimezoneOffset() * 60000)).toISOString().split("T")[0];
-        },
-        getDateFromMonthYear(monthYear) {
-            const [month, year] = monthYear.split('-');
-            return new Date(year, month - 1, 15);
-        },
-        getInvoiceKeyForDate(date, card) {
-            if (!date || !card || !card.closingDay) return '';
-            
-            const transactionDate = this.getDateObject(date);
-            let invoiceYear = transactionDate.getFullYear();
-            let invoiceMonth = transactionDate.getMonth() + 1; 
-
-            if (transactionDate.getDate() > card.closingDay) {
-                invoiceMonth += 1;
-                if (invoiceMonth > 12) {
-                    invoiceMonth = 1;
-                    invoiceYear += 1;
-                }
-            }
-            
-            return `${invoiceMonth.toString().padStart(2, '0')}-${invoiceYear}`;
-        },
-        capitalizeFirstLetter(string) { return string ? string.charAt(0).toUpperCase() + string.slice(1) : ''; },
-        formatCurrency(value) { return (parseFloat(value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); },
-        getContrastColor(hexColor) {
-            if (!hexColor || hexColor.length < 7) return '#FFFFFF';
-            const r = parseInt(hexColor.substr(1, 2), 16);
-            const g = parseInt(hexColor.substr(3, 2), 16);
-            const b = parseInt(hexColor.substr(5, 2), 16);
-            return ((r * 299) + (g * 587) + (b * 114)) / 1000 >= 128 ? '#000000' : '#FFFFFF';
-        },
-        findItemName(id, collectionName) {
-            const collection = this.state[collectionName] || [];
-            const item = collection.find(c => c && c.id === id);
-            return item ? item.name : 'N/A';
-        },
-        showToast(message, type = 'success') {
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
-            toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-check-circle' : 'fa-times-circle'}"></i> ${message}`;
-            this.elements.toastContainer.appendChild(toast);
-            setTimeout(() => toast.classList.add('show'), 10);
-            setTimeout(() => { toast.classList.remove('show'); toast.addEventListener('transitionend', () => toast.remove()); }, 4000);
-        },
         showInstallmentDetailsModal(installmentGroupId) {
             const installments = this.state.allTransactions
                 .filter(t => t && t.installmentGroupId === installmentGroupId)
@@ -1635,85 +1791,140 @@ document.addEventListener('DOMContentLoaded', () => {
             this.elements.modalContainer.innerHTML = modalHtml;
             this.setupModalEvents();
         },
-        async loadPlanningData() {
-            const docId = `planejamento_${this.state.currentMonthYear}`;
-            try {
-                const planningDoc = await this.db.collection('financeiro_planejamento').doc(docId).get();
-                let planningData = { receitas: [], despesas: [] };
-                if (planningDoc.exists) {
-                    planningData = planningDoc.data().planningData || { receitas: [], despesas: [] };
-                } else {
-                    const [month, year] = this.state.currentMonthYear.split('-').map(Number);
-                    const prevDate = new Date(year, month - 2, 1);
-                    const prevMonthYear = `${(prevDate.getMonth() + 1).toString().padStart(2, '0')}-${prevDate.getFullYear()}`;
-                    const prevDoc = await this.db.collection('financeiro_planejamento').doc(`planejamento_${prevMonthYear}`).get();
-                    if (prevDoc.exists) {
-                        const prevData = prevDoc.data().planningData;
-                        planningData.receitas = prevData.receitas || [];
-                        planningData.despesas = (prevData.despesas || []).map(d => ({ ...d, paid: false, value: d.isAutomatic ? 0 : d.value }));
-                        await this.savePlanningData(planningData);
+        
+        // ======================================================================
+        // OCR E ASSOCIAÇÃO
+        // ======================================================================
+        launchOcr() {
+            const fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = 'image/png, image/jpeg';
+            fileInput.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const ocrButton = document.querySelector('[data-action="launch-ocr"]');
+                const originalBtnHtml = ocrButton.innerHTML;
+                ocrButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>`;
+                ocrButton.disabled = true;
+
+                try {
+                    const { data: { text } } = await Tesseract.recognize(file, 'por');
+                    console.log("Texto extraído:", text);
+                    
+                    const extractedData = this.parseReceiptText(text);
+
+                    if (extractedData.value && extractedData.date) {
+                        this.showToast('Dados extraídos com sucesso!', 'success');
+                        this.renderLancamentoForm('saida', extractedData);
+                    } else {
+                        this.showToast('Não foi possível extrair valor e data. Tente um comprovante mais nítido.', 'error');
                     }
+
+                } catch (error) {
+                    console.error("Erro no OCR:", error);
+                    this.showToast('Ocorreu um erro ao ler o comprovante.', 'error');
+                } finally {
+                    ocrButton.innerHTML = originalBtnHtml;
+                    ocrButton.disabled = false;
                 }
-                this.state.planningData = this.generateAutomaticInvoiceItems(planningData);
-            } catch (error) { this.state.planningData = { receitas: [], despesas: [] }; }
+            };
+            fileInput.click();
         },
-        async savePlanningData() {
-            const docId = `planejamento_${this.state.currentMonthYear}`;
-            await this.db.collection('financeiro_planejamento').doc(docId).set({ planningData: this.state.planningData }, { merge: true });
-        },
-        debouncedSavePlanning() {
-            clearTimeout(this.planningSaveTimeout);
-            this.planningSaveTimeout = setTimeout(() => {
-                this.savePlanningData();
-                this.showToast('Planejamento salvo!', 'success');
-            }, 1500);
-        },
-        generateAutomaticInvoiceItems(planningData) {
-            const creditCards = this.state.accounts.filter(acc => acc && acc.type === 'Cartão de Crédito' && !acc.arquivado);
-            const manualDespesas = (planningData.despesas || []).filter(d => d && !d.isAutomatic);
-            const automaticFaturas = creditCards.map(card => {
-                const existing = (planningData.despesas || []).find(d => d && d.isAutomatic && d.cardId === card.id);
-                return existing || { description: `Fatura ${card.name}`, value: 0, paid: false, isAutomatic: true, cardId: card.id };
-            });
-            planningData.despesas = [...automaticFaturas, ...manualDespesas];
-            return planningData;
-        },
-        addPlanningItem(type) {
-            if (type === 'receitas') {
-                if (!this.state.planningData.receitas) this.state.planningData.receitas = [];
-                this.state.planningData.receitas.push({ description: '', value: '' });
-                this.renderList('receitas');
-                setTimeout(() => {
-                    const list = document.querySelector('.planning-list[data-list-type="receitas"]');
-                    list.querySelector('.planning-item:last-child .planning-input-description input').focus();
-                }, 50);
-            } else if (type === 'despesas') {
-                const newItem = { description: '', value: '', paid: false, isAutomatic: false };
-                this.state.planningData.despesas.push(newItem);
-                this.renderSaidasSection();
-                setTimeout(() => {
-                    const list = document.querySelector('.planning-list[data-list-type="outrasDespesas"]');
-                    list.querySelector('.planning-item:last-child .planning-input-description input').focus();
-                }, 50);
+
+        parseReceiptText(text) {
+            const data = {};
+        
+            // 1. Extrair Valor
+            const valueMatch = text.match(/R\$\s*([\d.,]+)/i);
+            if (valueMatch && valueMatch[1]) {
+                data.value = parseFloat(valueMatch[1].replace(/\./g, '').replace(',', '.'));
             }
-            this.updateSummary();
-        },
-        deletePlanningItem(type, index) {
-            if (this.state.planningData[type]?.[index]) {
-                this.state.planningData[type].splice(index, 1);
-                this.savePlanningData();
-                this.renderAllPlanningSections();
+        
+            // 2. Extrair Data (focado no formato do Nubank: "20 set 2025")
+            const dateMatch = text.match(/(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})/i);
+            if (dateMatch) {
+                const day = dateMatch[1].padStart(2, '0');
+                const monthStr = dateMatch[2].toLowerCase().replace('.', '');
+                const year = dateMatch[3];
+                const monthMap = { jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06', jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12' };
+                const month = monthMap[monthStr];
+                if (day && month && year) {
+                    data.date = `${year}-${month}-${day}`; // Formato YYYY-MM-DD para o input[type=date]
+                }
             }
+        
+            return data;
         },
-        syncInvoiceValue(itemIndex, cardId) {
-            const card = this.state.accounts.find(a => a && a.id === cardId);
-            if (!card) return;
-            const invoiceDetails = this.calculateInvoiceDetails(cardId, true);
-            this.state.planningData.despesas[itemIndex].value = invoiceDetails.openInvoiceTotal;
-            this.savePlanningData();
-            this.renderSaidasSection();
-            this.updateSummary();
-            this.showToast(`Fatura de ${card.name} sincronizada!`, 'success');
+
+        showAssociationModal(description) {
+            if (!description) return;
+        
+            const getOptions = (items = []) => {
+                return items
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map(i => `<option value="${i.id}">${i.name}</option>`)
+                    .join('');
+            };
+        
+            const modalHtml = `
+            <div class="modal-content">
+                <form id="association-form">
+                    <input type="hidden" name="textoOcr" value="${description}">
+                    <div class="modal-header">
+                        <h2>Criar Associação</h2>
+                        <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                    <div class="modal-body">
+                        <p style="margin-bottom: 16px;">Associar o texto <strong>"${description}"</strong> a qual estabelecimento?</p>
+                        <div class="form-group">
+                            <label>Estabelecimento</label>
+                            <select name="entidadeId" required>
+                                <option value="">Selecione...</option>
+                                ${getOptions(this.state.establishments)}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-actions">
+                        <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                        <button type="submit" class="button-primary">Salvar Associação</button>
+                    </div>
+                </form>
+            </div>`;
+            
+            this.elements.modalContainer.innerHTML = modalHtml;
+            this.setupModalEvents();
+        },
+
+        async saveAssociation(form) {
+            const formData = new FormData(form);
+            const data = {
+                textoOcr: formData.get('textoOcr').trim().toLowerCase(),
+                entidadeId: formData.get('entidadeId'),
+                entidadeTipo: 'establishment'
+            };
+
+            if (!data.textoOcr || !data.entidadeId) {
+                this.showToast('Erro: dados inválidos para associação.', 'error');
+                return;
+            }
+
+            try {
+                await this.db.collection('financeiro_associacoes').add(data);
+                this.showToast('Associação criada com sucesso!', 'success');
+                this.closeModal();
+
+                const lancarForm = document.getElementById('lancar-form');
+                if (lancarForm) {
+                    const establishmentSelect = lancarForm.querySelector('select[name="establishmentId"]');
+                    establishmentSelect.value = data.entidadeId;
+                    lancarForm.querySelector('#association-helper-container').innerHTML = '';
+                    this.handleEstablishmentChange(data.entidadeId, lancarForm);
+                }
+            } catch (error) {
+                console.error("Erro ao salvar associação:", error);
+                this.showToast('Não foi possível salvar a associação.', 'error');
+            }
         },
 
         // ======================================================================
@@ -1972,7 +2183,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }, 15000);
 
             try {
-                // Give the UI a moment to update before heavy processing
                 await new Promise(resolve => setTimeout(resolve, 50));
 
                 const { jsPDF } = window.jspdf;
@@ -2037,71 +2247,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 exportBtn.innerHTML = originalBtnContent;
                 exportBtn.disabled = false;
             }
-        },
-
-        // ======================================================================
-        // OCR - LANÇAMENTO POR COMPROVANTE
-        // ======================================================================
-        launchOcr() {
-            const fileInput = document.createElement('input');
-            fileInput.type = 'file';
-            fileInput.accept = 'image/png, image/jpeg';
-            fileInput.onchange = async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                const ocrButton = document.querySelector('[data-action="launch-ocr"]');
-                const originalBtnHtml = ocrButton.innerHTML;
-                ocrButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>`;
-                ocrButton.disabled = true;
-
-                try {
-                    const { data: { text } } = await Tesseract.recognize(file, 'por');
-                    console.log("Texto extraído:", text);
-                    
-                    const extractedData = this.parseNubankPixReceipt(text);
-
-                    if (extractedData.value) {
-                        this.showToast('Dados extraídos com sucesso!', 'success');
-                        this.renderLancamentoForm('saida', extractedData);
-                    } else {
-                        this.showToast('Não foi possível extrair os dados. Tente um comprovante mais nítido.', 'error');
-                    }
-
-                } catch (error) {
-                    console.error("Erro no OCR:", error);
-                    this.showToast('Ocorreu um erro ao ler o comprovante.', 'error');
-                } finally {
-                    ocrButton.innerHTML = originalBtnHtml;
-                    ocrButton.disabled = false;
-                }
-            };
-            fileInput.click();
-        },
-
-        parseNubankPixReceipt(text) {
-            const data = {};
-            
-            const valueMatch = text.match(/R\$\s*([\d.,]+)/);
-            if (valueMatch && valueMatch[1]) {
-                data.value = parseFloat(valueMatch[1].replace(/\./g, '').replace(',', '.'));
-            }
-
-            const dateMatch = text.match(/(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})/i);
-            if (dateMatch) {
-                const day = dateMatch[1];
-                const monthStr = dateMatch[2].toLowerCase().replace('.', '');
-                const year = dateMatch[3];
-                const monthMap = { jan: 0, fev: 1, mar: 2, abr: 3, mai: 4, jun: 5, jul: 6, ago: 7, set: 8, out: 9, nov: 10, dez: 11 };
-                const month = monthMap[monthStr];
-                
-                if (day && month !== undefined && year) {
-                    data.date = new Date(year, month, day).toISOString().split('T')[0];
-                }
-            }
-
-            return data;
-        },
+        }
     };
 
     App.init();
