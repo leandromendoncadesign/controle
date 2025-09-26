@@ -1814,11 +1814,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     
                     const extractedData = this.parseReceiptText(text);
 
-                    if (extractedData.value && extractedData.date) {
+                    if (Object.keys(extractedData).length > 0) {
                         this.showToast('Dados extraídos com sucesso!', 'success');
                         this.renderLancamentoForm('saida', extractedData);
                     } else {
-                        this.showToast('Não foi possível extrair valor e data. Tente um comprovante mais nítido.', 'error');
+                        this.showToast('Não foi possível extrair os dados. Tente um comprovante mais nítido.', 'error');
                     }
 
                 } catch (error) {
@@ -1834,23 +1834,77 @@ document.addEventListener('DOMContentLoaded', () => {
 
         parseReceiptText(text) {
             const data = {};
+            const lowerCaseText = text.toLowerCase();
         
-            // 1. Extrair Valor
-            const valueMatch = text.match(/R\$\s*([\d.,]+)/i);
+            // 1. Extrair Valor (Mantém o mesmo, pois é robusto)
+            const valueMatch = lowerCaseText.match(/r\$\s*([\d.,]+)/);
             if (valueMatch && valueMatch[1]) {
                 data.value = parseFloat(valueMatch[1].replace(/\./g, '').replace(',', '.'));
             }
         
-            // 2. Extrair Data (focado no formato do Nubank: "20 set 2025")
-            const dateMatch = text.match(/(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})/i);
-            if (dateMatch) {
-                const day = dateMatch[1].padStart(2, '0');
-                const monthStr = dateMatch[2].toLowerCase().replace('.', '');
-                const year = dateMatch[3];
-                const monthMap = { jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06', jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12' };
-                const month = monthMap[monthStr];
-                if (day && month && year) {
-                    data.date = `${year}-${month}-${day}`; // Formato YYYY-MM-DD para o input[type=date]
+            // 2. Extrair Data (Lógica aprimorada com múltiplos padrões)
+            const monthMap = {
+                jan: '01', janeiro: '01',
+                fev: '02', fevereiro: '02',
+                mar: '03', março: '03',
+                abr: '04', abril: '04',
+                mai: '05', maio: '05',
+                jun: '06', junho: '06',
+                jul: '07', julho: '07',
+                ago: '08', agosto: '08',
+                set: '09', setembro: '09',
+                out: '10', outubro: '10',
+                nov: '11', novembro: '11',
+                dez: '12', dezembro: '12'
+            };
+            const datePatterns = [
+                { regex: /(\d{1,2})\/(\w+)\/(\d{4})/, day: 1, month: 2, year: 3 }, // PicPay: 24/setembro/2025
+                { regex: /(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/, day: 1, month: 2, year: 3 }, // Genérico: 24 de setembro de 2025
+                { regex: /(\d{1,2})\/(\d{1,2})\/(\d{4})/, day: 1, month: 2, year: 3 }, // Willbank: 14/08/2025
+                { regex: /(\d{1,2})\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\.?\s+(\d{4})/, day: 1, month: 2, year: 3 } // Nubank: 20 SET 2025
+            ];
+        
+            for (const pattern of datePatterns) {
+                if(data.date) break; // Já encontrou a data, não precisa continuar
+                const dateMatch = lowerCaseText.match(pattern.regex);
+                if (dateMatch) {
+                    const day = dateMatch[pattern.day].padStart(2, '0');
+                    let monthStr = dateMatch[pattern.month].toLowerCase().replace('.', '');
+                    const year = dateMatch[pattern.year];
+                    
+                    const month = monthStr.match(/^\d+$/) ? monthStr.padStart(2, '0') : monthMap[monthStr];
+        
+                    if (day && month && year) {
+                        data.date = `${year}-${month}-${day}`;
+                    }
+                }
+            }
+        
+            // 3. Extrair Descrição/Estabelecimento (Nova lógica)
+            const establishmentPatterns = [
+                /local da transação:\s*\n(.+)/i,  // Picpay
+                /estabelecimento\s(.+)/i,          // Nubank
+                /para\s*\n(.+)/i,                   // Nubank PIX
+                /destinatário\s*\n(.+)/i,        // Outro PIX
+            ];
+        
+            for (const pattern of establishmentPatterns) {
+                if(data.description) break; // Já encontrou, não precisa continuar
+                const establishmentMatch = text.match(pattern);
+                if (establishmentMatch && establishmentMatch[1]) {
+                    data.description = establishmentMatch[1].trim().split('\n')[0];
+                }
+            }
+        
+            // Heurística para Willbank e similares (se nenhum padrão acima funcionar)
+            if (!data.description) {
+                const lines = text.split('\n');
+                for (const line of lines) {
+                    const trimmedLine = line.trim();
+                    if (trimmedLine.length >= 5 && trimmedLine.length <= 50 && trimmedLine === trimmedLine.toUpperCase() && !trimmedLine.match(/compra|pagamento|detalhe|willbank|picpay|nubank|crédito|comprovante/i)) {
+                        data.description = trimmedLine;
+                        break;
+                    }
                 }
             }
         
