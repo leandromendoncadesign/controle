@@ -3,14 +3,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const App = {
         state: {
             currentView: 'resumos',
+            currentSubView: null,
             currentMonthYear: '',
             allTransactions: [],
             accounts: [],
             categories: [],
             people: [],
             establishments: [],
-            associations: [],
-            ocrRules: [], // Armazena as regras do OCR
+            ocrRules: [],
             listeners: [],
             charts: {},
             isLoading: true,
@@ -135,9 +135,10 @@ document.addEventListener('DOMContentLoaded', () => {
             e.preventDefault();
             const view = e.currentTarget.dataset.view;
             
-            if (this.state.currentView === view && !data) return;
+            if (this.state.currentView === view && !data && !this.state.currentSubView) return;
 
             this.state.currentView = view;
+            this.state.currentSubView = null;
             this.render();
             
             if (view === 'lancar' && data) {
@@ -175,7 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 'financeiro_categorias': 'categories',
                 'financeiro_pessoas': 'people',
                 'financeiro_estabelecimentos': 'establishments',
-                'financeiro_associacoes': 'associations',
                 'financeiro_regras_ocr': 'ocrRules'
             };
             const promises = Object.entries(collections).map(([col, stateKey]) =>
@@ -283,7 +283,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'movements': newViewHtml = this.getMovementsHtml(); break;
                 case 'accounts': newViewHtml = this.getAccountsHtml(); break;
                 case 'planning': newViewHtml = this.getPlanningHtml(); break;
-                case 'settings': newViewHtml = this.getSettingsHtml(); break;
+                case 'settings': 
+                    newViewHtml = this.state.currentSubView ? this.getSettingsSubmenuHtml(this.state.currentSubView) : this.getSettingsHtml();
+                    break;
                 default: newViewHtml = this.getResumosHtml();
             }
             const newView = document.createElement('div');
@@ -293,7 +295,9 @@ document.addEventListener('DOMContentLoaded', () => {
             viewContainer.innerHTML = ''; 
             viewContainer.appendChild(newView);
 
-            mainContent.scrollTop = scrollY;
+            if(this.state.currentView !== 'settings') {
+                mainContent.scrollTop = scrollY;
+            }
             
             if (this.state.currentView === 'resumos') {
                 const transactionsThisMonth = this.state.allTransactions.filter(t => t.monthYear === this.state.currentMonthYear);
@@ -314,16 +318,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     sessionStorage.removeItem('lancamentoFormState');
                 }
             }
-            if (this.state.currentView === 'settings') {
-                this.setupAppearanceSettings();
-                this.renderOcrRulesList();
+            if (this.state.currentView === 'settings' && this.state.currentSubView) {
+                if (this.state.currentSubView === 'ocr-rules') {
+                    this.renderOcrRulesList();
+                } else if (this.state.currentSubView === 'appearance') {
+                    this.setupAppearanceSettings();
+                }
             }
         },
 
-        postRenderPlanning() {
-            this.renderAllPlanningSections();
-            this.attachPlanningKeydownListener();
-        },
+        // ======================================================================
+        // FUNÇÕES DE GERAÇÃO DE HTML DAS VIEWS
+        // ======================================================================
+
         getResumosHtml() {
             const transactionsThisMonth = this.state.allTransactions.filter(t => t && t.monthYear === this.state.currentMonthYear);
             const totalIncome = transactionsThisMonth.filter(t => t.type === 'Entrada').reduce((sum, t) => sum + t.value, 0);
@@ -449,6 +456,28 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         getSettingsHtml() {
+            return `
+            <div class="view-header"><h2><i class="fa-solid fa-gears"></i> Ajustes</h2></div>
+            <div class="card settings-menu">
+                <a class="settings-menu-item" data-action="navigate-to-submenu" data-submenu="categories-people">
+                    <div class="icon-title"><i class="fa-solid fa-tags"></i> Categorias e Pessoas</div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </a>
+                <a class="settings-menu-item" data-action="navigate-to-submenu" data-submenu="establishments">
+                    <div class="icon-title"><i class="fa-solid fa-store"></i> Estabelecimentos</div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </a>
+                <a class="settings-menu-item" data-action="navigate-to-submenu" data-submenu="ocr-rules">
+                    <div class="icon-title"><i class="fa-solid fa-robot"></i> Regras do Leitor (OCR)</div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </a>
+                <a class="settings-menu-item" data-action="navigate-to-submenu" data-submenu="appearance">
+                    <div class="icon-title"><i class="fa-solid fa-palette"></i> Aparência</div>
+                    <i class="fa-solid fa-chevron-right"></i>
+                </a>
+            </div>`;
+        },
+        getSettingsSubmenuHtml(submenu) {
             const getItemsHtml = (items, type, icon) => {
                 if (!items || items.length === 0) return `<div class="empty-state" style="padding: 20px 0;">Nenhum item cadastrado.</div>`;
                 return items
@@ -456,62 +485,79 @@ document.addEventListener('DOMContentLoaded', () => {
                     .sort((a, b) => a.name.localeCompare(b.name))
                     .map(item => `
                     <div class="item-list-row">
-                    <span class="icon-name"><i class="fa-solid ${item.icon || icon}"></i> ${item.name}</span>
-                    <div class="actions">
-                    <button class="button-icon" data-action="edit-${type}" data-id="${item.id}"><i class="fa-solid fa-pen"></i></button>
-                    <button class="button-icon delete-btn" data-action="delete-${type}" data-id="${item.id}"><i class="fa-solid fa-trash"></i></button>
-                    </div>
+                        <span class="icon-name"><i class="fa-solid ${item.icon || icon}"></i> ${item.name}</span>
+                        <div class="actions">
+                            <button class="button-icon" data-action="edit-${type}" data-id="${item.id}"><i class="fa-solid fa-pen"></i></button>
+                            <button class="button-icon delete-btn" data-action="delete-${type}" data-id="${item.id}"><i class="fa-solid fa-trash"></i></button>
+                        </div>
                     </div>`).join('');
             };
+
+            const submenus = {
+                'categories-people': {
+                    title: 'Categorias e Pessoas',
+                    content: `
+                    <div class="card">
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-tags"></i> Categorias</h3>
+                                <button class="button-primary" data-action="add-category"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                            </div>
+                            <div id="categories-list">${getItemsHtml(this.state.categories, 'category', 'fa-tag')}</div>
+                        </div>
+                        <div class="settings-section">
+                            <div class="settings-section-header">
+                                <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-users"></i> Pessoas</h3>
+                                <button class="button-primary" data-action="add-person"><i class="fa-solid fa-plus"></i> Adicionar</button>
+                            </div>
+                            <div id="people-list">${getItemsHtml(this.state.people, 'person', 'fa-user')}</div>
+                        </div>
+                    </div>`,
+                    actions: ''
+                },
+                'establishments': {
+                    title: 'Estabelecimentos',
+                    content: `<div class="card">${getItemsHtml(this.state.establishments, 'establishment', 'fa-store')}</div>`,
+                    actions: `<button class="button-primary" data-action="add-establishment"><i class="fa-solid fa-plus"></i> Adicionar</button>`
+                },
+                'ocr-rules': {
+                    title: 'Regras do Leitor (OCR)',
+                    content: `<div class="card"><div id="ocr-rules-list"><div class="loading-spinner small"></div></div></div>`,
+                    actions: `<button class="button-primary" data-action="add-ocr-rule"><i class="fa-solid fa-plus"></i> Adicionar Regra</button>`
+                },
+                'appearance': {
+                    title: 'Aparência',
+                    content: `
+                    <div class="card">
+                        <div class="form-group">
+                            <label for="font-size-slider">Tamanho da Fonte</label>
+                            <input type="range" id="font-size-slider" min="14" max="20" step="1" style="width: 100%; cursor: pointer;">
+                        </div>
+                        <div class="form-group">
+                            <label for="animation-style-selector">Estilo de Animação</label>
+                            <select id="animation-style-selector">
+                                <option value="sutil">Sutil (Padrão)</option>
+                                <option value="fluida">Fluida</option>
+                                <option value="instantanea">Instantânea (Sem Animações)</option>
+                            </select>
+                        </div>
+                    </div>`,
+                    actions: ''
+                }
+            };
+
+            const current = submenus[submenu];
+            if (!current) return this.getSettingsHtml(); 
+
             return `
-            <div class="view-header"><h2><i class="fa-solid fa-gears"></i> Configurações</h2></div>
-            <div class="card">
-                <div class="settings-section">
-                    <div class="settings-section-header">
-                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-tags"></i> Categorias</h3>
-                        <button class="button-primary" data-action="add-category"><i class="fa-solid fa-plus"></i> Adicionar</button>
-                    </div>
-                    <div id="categories-list">${getItemsHtml(this.state.categories, 'category', 'fa-tag')}</div>
+            <div class="view-header">
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <button class="month-nav-arrow" data-action="navigate-back-from-submenu" title="Voltar"><i class="fa-solid fa-chevron-left"></i></button>
+                    <h2>${current.title}</h2>
                 </div>
-                <div class="settings-section">
-                    <div class="settings-section-header">
-                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-users"></i> Pessoas/Terceiros</h3>
-                        <button class="button-primary" data-action="add-person"><i class="fa-solid fa-plus"></i> Adicionar</button>
-                    </div>
-                    <div id="people-list">${getItemsHtml(this.state.people, 'person', 'fa-user')}</div>
-                </div>
-                <div class="settings-section">
-                    <div class="settings-section-header">
-                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-store"></i> Estabelecimentos</h3>
-                        <button class="button-primary" data-action="add-establishment"><i class="fa-solid fa-plus"></i> Adicionar</button>
-                    </div>
-                    <div id="establishments-list">${getItemsHtml(this.state.establishments, 'establishment', 'fa-store')}</div>
-                </div>
-                <div class="settings-section">
-                    <div class="settings-section-header">
-                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-palette"></i> Aparência</h3>
-                    </div>
-                    <div class="form-group">
-                        <label for="font-size-slider">Tamanho da Fonte</label>
-                        <input type="range" id="font-size-slider" min="14" max="20" step="1" style="width: 100%; cursor: pointer;">
-                    </div>
-                    <div class="form-group">
-                        <label for="animation-style-selector">Estilo de Animação</label>
-                        <select id="animation-style-selector">
-                            <option value="sutil">Sutil (Padrão)</option>
-                            <option value="fluida">Fluida</option>
-                            <option value="instantanea">Instantânea (Sem Animações)</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="settings-section">
-                    <div class="settings-section-header">
-                        <h3 class="card-title" style="margin: 0;"><i class="fa-solid fa-robot"></i> Regras do Leitor de Comprovantes (OCR)</h3>
-                        <button class="button-primary" data-action="add-ocr-rule"><i class="fa-solid fa-plus"></i> Adicionar Regra</button>
-                    </div>
-                    <div id="ocr-rules-list"><div class="loading-spinner small"></div></div>
-                </div>
-            </div>`;
+                <div class="actions">${current.actions || ''}</div>
+            </div>
+            ${current.content}`;
         },
         renderOcrRulesList() {
             const container = document.getElementById('ocr-rules-list');
@@ -533,7 +579,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 value: 'Valor',
                 date: 'Data',
                 description: 'Descrição/Estabelecimento',
-                installments: 'Parcelas'
+                installments: 'Parcelas',
+                account: 'Conta/Cartão'
             };
         
             let html = '';
@@ -741,6 +788,133 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
             </div>`;
         },
+
+        // ======================================================================
+        // PLANEJAMENTO (Funções restauradas)
+        // ======================================================================
+
+        async loadPlanningData() {
+            const docRef = this.db.collection('financeiro_planejamento').doc(this.state.currentMonthYear);
+            try {
+                const doc = await docRef.get();
+                if (doc.exists) {
+                    this.state.planningData = doc.data();
+                } else {
+                    this.state.planningData = { receitas: [], despesas: [] };
+                }
+                await this.syncAutomaticInvoices();
+            } catch (error) {
+                console.error("Erro ao carregar planejamento:", error);
+                this.state.planningData = { receitas: [], despesas: [] };
+            }
+        },
+
+        postRenderPlanning() {
+            this.renderAllPlanningSections();
+            this.attachPlanningKeydownListener();
+        },
+
+        debouncedSavePlanning() {
+            clearTimeout(this.planningSaveTimeout);
+            this.planningSaveTimeout = setTimeout(() => {
+                this.savePlanningData();
+            }, 1500);
+        },
+
+        async savePlanningData() {
+            const docId = this.state.currentMonthYear;
+            try {
+                await this.db.collection('financeiro_planejamento').doc(docId).set(this.state.planningData, { merge: true });
+                console.log(`Planejamento de ${docId} salvo.`);
+            } catch (error) {
+                console.error('Erro ao salvar planejamento:', error);
+                this.showToast('Erro ao salvar planejamento.', 'error');
+            }
+        },
+
+        async syncAutomaticInvoices() {
+            const creditCards = this.state.accounts.filter(a => a && a.type === 'Cartão de Crédito' && !a.arquivado);
+            if (creditCards.length === 0) return;
+
+            let despesas = [...(this.state.planningData.despesas || [])];
+            let hasChanged = false;
+
+            // Remove entradas automáticas de cartões que foram arquivados ou excluídos
+            despesas = despesas.filter(d => {
+                if (!d.isAutomatic) return true; // Mantém despesas manuais
+                return creditCards.some(card => card.id === d.cardId);
+            });
+        
+            for (const card of creditCards) {
+                // Para o planejamento de Mês X, pegamos a fatura que fecha no Mês X.
+                const invoiceDetails = this.calculateInvoiceDetails(card.id, false); // false = use currentMonthYear
+                const invoiceTotal = invoiceDetails.openInvoiceTotal || 0;
+        
+                const existingInvoiceIndex = despesas.findIndex(d => d.cardId === card.id && d.isAutomatic);
+        
+                if (existingInvoiceIndex > -1) {
+                    if (despesas[existingInvoiceIndex].value !== invoiceTotal) {
+                        despesas[existingInvoiceIndex].value = invoiceTotal;
+                        hasChanged = true;
+                    }
+                } else {
+                    if (invoiceTotal > 0) {
+                        despesas.push({
+                            description: `Fatura ${card.name}`,
+                            value: invoiceTotal,
+                            paid: false,
+                            isAutomatic: true,
+                            cardId: card.id
+                        });
+                        hasChanged = true;
+                    }
+                }
+            }
+        
+            if (hasChanged) {
+                this.state.planningData.despesas = despesas;
+                await this.savePlanningData();
+            }
+        },
+        
+        async syncInvoiceValue(index, cardId) {
+            const invoiceDetails = this.calculateInvoiceDetails(cardId, false);
+            const invoiceTotal = invoiceDetails.openInvoiceTotal || 0;
+            
+            const item = this.state.planningData.despesas[parseInt(index)];
+            if(item) {
+                item.value = invoiceTotal;
+                this.showToast(`Fatura ${this.findItemName(cardId, 'accounts')} sincronizada!`, 'success');
+                this.renderCurrentView(); // Re-renderiza para mostrar o novo valor
+                await this.savePlanningData();
+            }
+        },
+
+        addPlanningItem(type) {
+            if (!this.state.planningData[type]) this.state.planningData[type] = [];
+            
+            const newItem = type === 'despesas'
+                ? { description: '', value: '', paid: false }
+                : { description: '', value: '' };
+        
+            this.state.planningData[type].push(newItem);
+            this.savePlanningData(); 
+            this.renderCurrentView().then(() => {
+                const inputs = document.querySelectorAll(`.planning-input[data-type="${type}"]`);
+                if (inputs.length > 0) {
+                    inputs[inputs.length - 2].focus(); // Foca na descrição do novo item
+                }
+            });
+        },
+
+        deletePlanningItem(type, index) {
+            if (this.state.planningData[type] && this.state.planningData[type][index]) {
+                this.state.planningData[type].splice(index, 1);
+                this.savePlanningData();
+                this.renderCurrentView();
+            }
+        },
+
         attachPlanningKeydownListener() {
             this.elements.planningKeydownListener = (e) => {
                 if (e.key !== 'Enter' || !e.target.classList.contains('planning-input')) return;
@@ -756,6 +930,10 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             this.elements.viewContainer.addEventListener('keydown', this.elements.planningKeydownListener);
         },
+        
+        // ======================================================================
+        // HANDLERS DE EVENTOS
+        // ======================================================================
 
         handleViewContainerClick(e) {
             const actionTarget = e.target.closest('[data-action]');
@@ -777,9 +955,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const { action, id, type, index, cardId, chart, invoiceKey } = actionTarget.dataset;
+            const { action, id, type, index, cardId, chart, invoiceKey, submenu } = actionTarget.dataset;
             
             const actionHandlers = {
+                'navigate-to-submenu': () => { this.state.currentSubView = submenu; this.renderCurrentView(); },
+                'navigate-back-from-submenu': () => { this.state.currentSubView = null; this.renderCurrentView(); },
                 'show-lancar-form': () => this.renderLancamentoForm(actionTarget.dataset.formType),
                 'launch-ocr': () => this.launchOcr(),
                 'cancel-lancar-form': () => {
@@ -806,7 +986,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'add-category': () => this.showCategoryModal(), 'edit-category': () => this.showCategoryModal(id), 'delete-category': () => this.deleteItem('financeiro_categorias', id, 'Categoria'),
                 'add-person': () => this.showPersonModal(), 'edit-person': () => this.showPersonModal(id), 'delete-person': () => this.deleteItem('financeiro_pessoas', id, 'Pessoa'),
                 'add-establishment': () => this.showEstablishmentModal(), 'edit-establishment': () => this.showEstablishmentModal(id), 'delete-establishment': () => this.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
-                'show-association-modal': () => this.showAssociationModal(actionTarget.dataset.description),
+                'show-add-alias-modal': () => this.showAddAliasModal(actionTarget.dataset.description),
                 'add-ocr-rule': () => this.showOcrRuleModal(),
                 'edit-ocr-rule': () => this.showOcrRuleModal(id),
                 'delete-ocr-rule': () => this.deleteItem('financeiro_regras_ocr', id, 'Regra OCR'),
@@ -828,7 +1008,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 'category-form': () => this.saveItem(e, 'financeiro_categorias', 'Categoria'),
                 'person-form': () => this.saveItem(e, 'financeiro_pessoas', 'Pessoa'),
                 'establishment-form': () => this.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento'),
-                'association-form': () => this.saveAssociation(form),
+                'add-alias-form': () => this.saveAssociation(form),
                 'transaction-form': () => this.saveTransaction(form, true),
                 'installment-form': () => this.saveInstallmentEdit(form),
                 'anticipate-installments-form': () => this.anticipateInstallments(form),
@@ -858,9 +1038,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const planningInput = e.target.closest('.planning-input');
             if (planningInput && !planningInput.readOnly && this.state.currentView === 'planning') {
                 const { type, index, field } = planningInput.dataset;
-                const value = planningInput.type === 'number' ? planningInput.value : planningInput.value;
-                if (planningInput.type === 'number' && isNaN(parseFloat(value)) && value !== '' && value !== '-') return;
-                this.state.planningData[type][parseInt(index)][field] = value;
+                const value = planningInput.type === 'number' ? parseFloat(planningInput.value) || 0 : planningInput.value;
+                if (!this.state.planningData[type]) this.state.planningData[type] = [];
+                if (!this.state.planningData[type][index]) this.state.planningData[type][index] = {};
+                this.state.planningData[type][index][field] = value;
                 this.updateSummary();
                 this.debouncedSavePlanning();
                 return;
@@ -894,23 +1075,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
         
-            // Prioridade 1: Associação direta
-            const association = this.state.associations.find(a => a.textoOcr === normalizedText);
-            if (association) {
-                const establishment = this.state.establishments.find(e => e.id === association.entidadeId);
-                if (establishment) {
-                    descriptionInput.value = establishment.name;
-                    establishmentSelect.value = establishment.id;
-                    this.handleEstablishmentChange(establishment.id, form);
-                    return;
-                }
-            }
-        
-            // Prioridade 2: Apelidos/Aliases dos estabelecimentos
+            // Prioridade 1: Apelidos/Aliases dos estabelecimentos
             for (const establishment of this.state.establishments) {
                 if (establishment.aliases && establishment.aliases.length > 0) {
                     for (const alias of establishment.aliases) {
-                        if (alias && normalizedText.includes(alias)) {
+                        if (alias && (normalizedText.includes(alias) || normalizedText === alias)) {
                             descriptionInput.value = establishment.name;
                             establishmentSelect.value = establishment.id;
                             this.handleEstablishmentChange(establishment.id, form);
@@ -920,7 +1089,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         
-            // Prioridade 3: Nome Fantasia direto
+            // Prioridade 2: Nome Fantasia direto
             const directMatch = this.state.establishments.find(e => e.name.trim().toLowerCase() === normalizedText);
             if (directMatch) {
                 descriptionInput.value = directMatch.name;
@@ -929,10 +1098,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
         
-            // Fallback: Oferecer para criar associação
+            // Fallback: Oferecer para criar associação/apelido
             establishmentSelect.value = '';
             if (this.state.establishments.length > 0) {
-                associationContainer.innerHTML = `<button type="button" class="button-secondary" data-action="show-association-modal" data-description="${description.trim()}" style="width: 100%; margin-top: 8px;"><i class="fa-solid fa-link"></i> Associar "${description.trim()}" a um estabelecimento?</button>`;
+                associationContainer.innerHTML = `<button type="button" class="button-secondary" data-action="show-add-alias-modal" data-description="${description.trim()}" style="width: 100%; margin-top: 8px;"><i class="fa-solid fa-link"></i> Associar "${description.trim()}" a um estabelecimento?</button>`;
             }
         },
 
@@ -1052,7 +1221,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
 
-            // CORREÇÃO: Chama explicitamente o handler de descrição para acionar a busca por estabelecimento
             if (prefillData.description) {
                 const newForm = container.querySelector('#lancar-form');
                 if (newForm) {
@@ -1198,7 +1366,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         delete data.dueDate;
                         delete data.closingDay;
                     }
-                    data.identificadores = data.identificadores.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
                 } else if (itemName === 'Estabelecimento') {
                     data.categoriaPadraoId = data.categoriaPadraoId || '';
                     data.aliases = data.aliases.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
@@ -1207,32 +1374,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     data.enabled = !!data.enabled;
 
                     const isSimpleMode = form.querySelector('.mode-btn[data-mode="simple"]')?.classList.contains('active');
-                    if (isSimpleMode) {
-                        const wizardType = data.wizard_type;
-                        const wizardValue = this.escapeRegex(data.wizard_value || '');
+                    if (isSimpleMode && data.wizard_subtype) {
+                        const wizardSubtype = data.wizard_subtype;
+                        const wizardKeyword = this.escapeRegex(data.wizard_keyword || '');
                         let generatedPattern = '';
 
-                        switch(wizardType) {
-                            case 'starts_with':
-                                generatedPattern = `^${wizardValue}\\s*([\\s\\S]*)`;
+                        switch(wizardSubtype) {
+                            case 'exact_text':
+                                generatedPattern = `(${wizardKeyword})`;
+                                break;
+                            case 'same_line_after':
+                                generatedPattern = `${wizardKeyword}\\s*(.+)`;
                                 break;
                             case 'next_line_after':
-                                generatedPattern = `${wizardValue}\\s*\\n(.+)`;
-                                break;
-                            case 'date_pattern_1':
-                                generatedPattern = `(\\d{1,2})\\/(\\w+)\\/(\\d{4})`;
-                                break;
-                            case 'date_pattern_2':
-                                generatedPattern = `(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})`;
-                                break;
-                            case 'installments_pattern_1':
-                                generatedPattern = `parcela\\s\\d{1,2}\\s*\\/\\s*(\\d{1,2})`;
+                                generatedPattern = `${wizardKeyword}\\s*\\n(.+)`;
                                 break;
                         }
-                        data.pattern = generatedPattern;
+                        if (generatedPattern) data.pattern = generatedPattern;
                     }
-                    delete data.wizard_type;
-                    delete data.wizard_value;
+                    delete data.wizard_subtype;
+                    delete data.wizard_keyword;
+
+                    if (data.type === 'account' && !data.accountId) {
+                        throw new Error('Para regras do tipo "Conta/Cartão", é obrigatório selecionar uma conta.');
+                    }
+                    if (data.type !== 'account') {
+                        delete data.accountId;
+                    }
                 }
 
                 if (id) {
@@ -1245,7 +1413,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 this.closeModal();
 
             } catch (error) {
-                this.showToast(`Erro ao salvar ${itemName}.`, 'error');
+                this.showToast(error.message || `Erro ao salvar ${itemName}.`, 'error');
                 console.error(`Erro em saveItem para ${collection}:`, error);
             } finally {
                 if (submitButton) {
@@ -1317,7 +1485,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const isEditing = !!accountId;
             const account = isEditing ? this.state.accounts.find(a => a.id === accountId) : {};
             const accountColor = account?.color || '#007aff';
-            const identificadores = account?.identificadores ? account.identificadores.join(', ') : '';
         
             this.elements.modalContainer.innerHTML = `
             <div class="modal-content">
@@ -1353,11 +1520,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         <label>Dia do Fechamento</label>
                         <input type="number" min="1" max="31" name="closingDay" value="${account?.closingDay || ''}">
                     </div>
-                </div>
-                <div class="form-group">
-                    <label for="identificadores">Identificadores (para OCR)</label>
-                    <input type="text" name="identificadores" value="${identificadores}" placeholder="Ex: nubank, roxinho, final 1234">
-                    <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Palavras-chave separadas por vírgula para o sistema reconhecer esta conta.</p>
                 </div>
             </div>
             <div class="modal-actions">
@@ -1499,7 +1661,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>`;
             this.setupModalEvents();
         },
-        // CORREÇÃO: Função do modal de regras foi criada e implementada com o assistente
         showOcrRuleModal(ruleId = null) {
             const isEditing = !!ruleId;
             const rule = isEditing ? this.state.ocrRules.find(r => r.id === ruleId) : { enabled: true, priority: 10 };
@@ -1525,6 +1686,14 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <option value="date" ${rule?.type === 'date' ? 'selected' : ''}>Data</option>
                                 <option value="description" ${rule?.type === 'description' ? 'selected' : ''}>Descrição/Estabelecimento</option>
                                 <option value="installments" ${rule?.type === 'installments' ? 'selected' : ''}>Parcelas</option>
+                                <option value="account" ${rule?.type === 'account' ? 'selected' : ''}>Conta/Cartão</option>
+                            </select>
+                        </div>
+                        <div class="form-group hidden" id="ocr-rule-account-selector">
+                            <label>Associar Regra à Conta</label>
+                            <select name="accountId">
+                                <option value="">Selecione a conta...</option>
+                                ${this.state.accounts.map(acc => `<option value="${acc.id}" ${rule?.accountId === acc.id ? 'selected' : ''}>${acc.name}</option>`).join('')}
                             </select>
                         </div>
                         <div class="form-group">
@@ -1538,7 +1707,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 </div>
 
                             <div class="ocr-rule-advanced hidden" id="ocr-wizard-advanced">
-                                <textarea name="pattern" rows="3" placeholder="Ex: R\\$\\s*([\\d.,]+)" required>${rule?.pattern || ''}</textarea>
+                                <textarea name="pattern" rows="3" placeholder="Ex: R\\$\\s*([\\d.,]+)">${rule?.pattern || ''}</textarea>
                             </div>
                             <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Use o modo simples para criar regras fáceis ou o avançado para expressões regulares complexas.</p>
                         </div>
@@ -1561,44 +1730,41 @@ document.addEventListener('DOMContentLoaded', () => {
             this.elements.modalContainer.innerHTML = modalHtml;
             this.setupModalEvents();
 
-            // Lógica do assistente
-            const simpleModeBtn = document.querySelector('.mode-btn[data-mode="simple"]');
-            const advancedModeBtn = document.querySelector('.mode-btn[data-mode="advanced"]');
-            const simpleWizard = document.getElementById('ocr-wizard-simple');
-            const advancedWizard = document.getElementById('ocr-wizard-advanced');
-            const typeSelector = document.getElementById('ocr-rule-type');
+            const simpleModeBtn = this.elements.modalContainer.querySelector('.mode-btn[data-mode="simple"]');
+            const advancedModeBtn = this.elements.modalContainer.querySelector('.mode-btn[data-mode="advanced"]');
+            const simpleWizard = this.elements.modalContainer.querySelector('#ocr-wizard-simple');
+            const advancedWizard = this.elements.modalContainer.querySelector('#ocr-wizard-advanced');
+            const typeSelector = this.elements.modalContainer.querySelector('#ocr-rule-type');
+            const accountSelector = this.elements.modalContainer.querySelector('#ocr-rule-account-selector');
 
             const renderWizardOptions = () => {
                 const type = typeSelector.value;
+                accountSelector.classList.toggle('hidden', type !== 'account');
+                
                 let wizardHtml = '<div class="empty-state" style="padding: 1rem 0"><p>Selecione um tipo de dado para ver as opções.</p></div>';
+                
+                const commonWizard = (keywordPlaceholder) => `
+                    <div class="wizard-row">
+                        <label>Qual texto-chave devemos procurar?</label>
+                        <input type="text" name="wizard_keyword" placeholder="${keywordPlaceholder}">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>Onde está a informação que você quer?</label>
+                        <div class="wizard-row"><label><input type="radio" name="wizard_subtype" value="exact_text" checked>É exatamente este texto-chave</label></div>
+                        <div class="wizard-row"><label><input type="radio" name="wizard_subtype" value="same_line_after">Na mesma linha, após o texto-chave</label></div>
+                        <div class="wizard-row"><label><input type="radio" name="wizard_subtype" value="next_line_after">Na linha seguinte ao texto-chave</label></div>
+                    </div>`;
 
-                if (type === 'description' || type === 'value') {
-                    wizardHtml = `
-                        <div class="wizard-row">
-                            <label><input type="radio" name="wizard_type" value="starts_with" checked>Começa com:</label>
-                            <input type="text" name="wizard_value" placeholder="Ex: Estabelecimento">
-                        </div>
-                        <div class="wizard-row">
-                            <label><input type="radio" name="wizard_type" value="next_line_after">Na linha seguinte a:</label>
-                            <input type="text" name="wizard_value" placeholder="Ex: Para">
-                        </div>
-                    `;
-                } else if (type === 'date') {
-                     wizardHtml = `
-                        <div class="wizard-row">
-                            <label><input type="radio" name="wizard_type" value="date_pattern_1" checked>Formato dd/mês/yyyy</label>
-                        </div>
-                        <div class="wizard-row">
-                            <label><input type="radio" name="wizard_type" value="date_pattern_2">Formato dd/mm/yyyy</label>
-                        </div>
-                    `;
-                } else if (type === 'installments') {
-                     wizardHtml = `
-                        <div class="wizard-row">
-                            <label><input type="radio" name="wizard_type" value="installments_pattern_1" checked>Formato "parcela x/y"</label>
-                        </div>
-                    `;
+                if (type === 'account') {
+                    wizardHtml = commonWizard('Ex: nubank, final 1234');
+                } else if (type === 'value') {
+                     wizardHtml = commonWizard('Ex: Valor R$');
+                } else if (type === 'description') {
+                     wizardHtml = commonWizard('Ex: Estabelecimento');
+                } else if (type === 'date' || type === 'installments') {
+                    wizardHtml = '<div class="empty-state" style="padding: 1rem 0;"><p>Para regras de Data ou Parcelas, utilize o modo Avançado e consulte as regras padrão como exemplo.</p></div>';
                 }
+                
                 simpleWizard.innerHTML = wizardHtml;
             };
 
@@ -2084,8 +2250,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         parseReceiptText(text) {
             const data = {};
-            const lowerCaseText = text.toLowerCase();
-            const typesToExtract = ['value', 'date', 'description', 'installments'];
+            const typesToExtract = ['value', 'date', 'description', 'installments', 'account'];
         
             typesToExtract.forEach(type => {
                 const relevantRules = (this.state.ocrRules || [])
@@ -2100,7 +2265,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         const match = text.match(regex);
         
                         if (match) {
-                            if (type === 'value' && match[1]) {
+                            if (type === 'account') {
+                                data.accountId = rule.accountId;
+                            } else if (type === 'value' && match[1]) {
                                 data.value = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
                             } else if (type === 'description' && match[1]) {
                                 data.description = match[1].trim().split('\n')[0];
@@ -2123,23 +2290,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
         
-            for (const account of this.state.accounts) {
-                if (data.accountId) break;
-                if (account.identificadores && account.identificadores.length > 0) {
-                    for (const identifier of account.identificadores) {
-                        if (identifier && lowerCaseText.includes(identifier.toLowerCase())) {
-                            data.accountId = account.id;
-                            break;
-                        }
-                    }
-                }
-            }
-        
             const bankCategoryKeywords = { 'restaurante': ['restaurante', 'ifood', 'lanche', 'alimenta'], 'supermercado': ['supermercado', 'mercado'], 'transporte': ['uber', '99', 'transporte'], 'saúde': ['farmácia', 'drogaria', 'hospital', 'saude'], };
             for (const categoryName in bankCategoryKeywords) {
                 if (data.categoryId) break;
                 for (const keyword of bankCategoryKeywords[categoryName]) {
-                    if (lowerCaseText.includes(keyword)) {
+                    if (text.toLowerCase().includes(keyword)) {
                         const matchedCategory = this.state.categories.find(c => c.name.toLowerCase().includes(categoryName));
                         if (matchedCategory) {
                             data.categoryId = matchedCategory.id;
@@ -2152,7 +2307,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return data;
         },
 
-        showAssociationModal(description) {
+        showAddAliasModal(description) {
             if (!description) return;
         
             const getOptions = (items = []) => {
@@ -2164,10 +2319,10 @@ document.addEventListener('DOMContentLoaded', () => {
         
             const modalHtml = `
             <div class="modal-content">
-                <form id="association-form">
+                <form id="add-alias-form">
                     <input type="hidden" name="textoOcr" value="${description}">
                     <div class="modal-header">
-                        <h2>Criar Associação</h2>
+                        <h2>Adicionar Apelido</h2>
                         <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
                     </div>
                     <div class="modal-body">
@@ -2182,7 +2337,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="modal-actions">
                         <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
-                        <button type="submit" class="button-primary">Salvar Associação</button>
+                        <button type="submit" class="button-primary">Salvar Apelido</button>
                     </div>
                 </form>
             </div>`;
@@ -2190,35 +2345,36 @@ document.addEventListener('DOMContentLoaded', () => {
             this.elements.modalContainer.innerHTML = modalHtml;
             this.setupModalEvents();
         },
-
         async saveAssociation(form) {
             const formData = new FormData(form);
-            const data = {
-                textoOcr: formData.get('textoOcr').trim().toLowerCase(),
-                entidadeId: formData.get('entidadeId'),
-                entidadeTipo: 'establishment'
-            };
-
-            if (!data.textoOcr || !data.entidadeId) {
+            const newAlias = formData.get('textoOcr').trim().toLowerCase();
+            const establishmentId = formData.get('entidadeId');
+    
+            if (!newAlias || !establishmentId) {
                 this.showToast('Erro: dados inválidos para associação.', 'error');
                 return;
             }
-
+    
             try {
-                await this.db.collection('financeiro_associacoes').add(data);
-                this.showToast('Associação criada com sucesso!', 'success');
+                const establishmentRef = this.db.collection('financeiro_estabelecimentos').doc(establishmentId);
+                
+                await establishmentRef.update({
+                    aliases: firebase.firestore.FieldValue.arrayUnion(newAlias)
+                });
+    
+                this.showToast('Apelido adicionado ao estabelecimento com sucesso!', 'success');
                 this.closeModal();
-
+    
                 const lancarForm = document.getElementById('lancar-form');
                 if (lancarForm) {
-                    const establishmentSelect = lancarForm.querySelector('select[name="establishmentId"]');
-                    establishmentSelect.value = data.entidadeId;
-                    lancarForm.querySelector('#association-helper-container').innerHTML = '';
-                    this.handleEstablishmentChange(data.entidadeId, lancarForm);
+                    const descriptionInput = lancarForm.querySelector('input[name="description"]');
+                    if (descriptionInput) {
+                         this.handleDescriptionChange(descriptionInput.value, lancarForm);
+                    }
                 }
             } catch (error) {
-                console.error("Erro ao salvar associação:", error);
-                this.showToast('Não foi possível salvar a associação.', 'error');
+                console.error("Erro ao adicionar apelido:", error);
+                this.showToast('Não foi possível adicionar o apelido.', 'error');
             }
         },
 
@@ -2548,3 +2704,4 @@ document.addEventListener('DOMContentLoaded', () => {
     App.init();
     window.App = App;
 });
+
