@@ -48,6 +48,17 @@ body.is-loading {
     height: 100vh;
 }
 
+/* NOVO ESTILO: Esconde #app-root apenas se o body estiver em estado de loading */
+body.is-loading #app-root {
+    visibility: hidden;
+    opacity: 0;
+}
+body.is-loading #auth-container {
+     visibility: hidden;
+     opacity: 0;
+}
+/* FIM NOVO ESTILO */
+
 #loading-overlay {
     position: fixed;
     top: 0;
@@ -92,7 +103,18 @@ body.is-loading {
     z-index: 1000;
     justify-content: center;
     align-items: center;
+    /* Transição para aparecer/desaparecer */
+    transition: opacity 0.4s ease-in-out;
+    opacity: 0;
+    visibility: hidden;
 }
+/* NOVO ESTILO: Garante que o auth-container apareça quando não estiver visível no body.is-loading */
+body:not(.is-loading) #auth-container.is-visible {
+    opacity: 1;
+    visibility: visible;
+}
+/* FIM NOVO ESTILO */
+
 .auth-box {
     background: var(--bg-secondary);
     padding: 40px;
@@ -154,12 +176,15 @@ body.is-loading {
 /* ====================================================================== */
 #app-root {
     display: flex;
-    visibility: hidden;
-    opacity: 0;
+    /* REMOVIDO: visibility: hidden; opacity: 0; */
     transition: opacity 0.4s ease-in-out;
 }
 
-#app-root.is-visible {
+/* NOVO ESTILO: #app-root se torna visível por padrão, exceto quando body.is-loading está ativo */
+/* REMOVIDO: #app-root.is-visible */
+
+/* Adiciona opacidade e visibilidade quando o body não está carregando */
+body:not(.is-loading) #app-root {
     visibility: visible;
     opacity: 1;
 }
@@ -920,6 +945,22 @@ body.is-loading {
     padding: 1.5rem;
     overflow-y: auto; 
     max-height: 60vh;
+}
+/* ADICIONADO: Estilos para o corpo do modal de confirmação */
+.modal-body.confirmation-body {
+    text-align: center;
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+.modal-body .confirmation-icon {
+    font-size: 2.5rem;
+    color: var(--accent-red);
+    margin-bottom: 1rem;
+}
+.modal-body .confirmation-message {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    line-height: 1.5;
 }
 .modal-actions {
     display: flex;
