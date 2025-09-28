@@ -2,16 +2,13 @@
 
 import { 
     showToast, 
-    escapeRegex,
     getDateObject,
     getInvoiceKeyForDate,
     getLocalISODate,
-    findItemName,
     capitalizeFirstLetter,
     formatCurrency
 } from './utils.js';
 
-// Variáveis de escopo global injetadas pelo App.js
 let appState; 
 let db;
 let savePlanningDataGlobal;
@@ -20,6 +17,7 @@ let renderLancamentoFormGlobal;
 let calculateInvoiceDetailsGlobal;
 let updateSummaryGlobal;
 let findItemNameGlobal;
+let planningSaveTimeout = null;
 
 export function initLogicManager(state, firestore, planningSaver, renderView, renderForm, invoiceDetailsFunc, summaryUpdateFunc, findNameFunc) {
     appState = state;
@@ -32,12 +30,6 @@ export function initLogicManager(state, firestore, planningSaver, renderView, re
     findItemNameGlobal = findNameFunc;
 }
 
-// ======================================================================
-// LÓGICA DE PLANEJAMENTO
-// ======================================================================
-
-let planningSaveTimeout = null;
-
 export function debouncedSavePlanning() {
     clearTimeout(planningSaveTimeout);
     planningSaveTimeout = setTimeout(() => {
@@ -46,43 +38,30 @@ export function debouncedSavePlanning() {
 }
 
 export async function syncAutomaticInvoices() {
-    const creditCards = appState.accounts.filter(a => a && a.type === 'Cartão de Crédito' && !a.arquivado);
-    if (creditCards.length === 0) return;
+    const creditCards = appState.accounts.filter(a => a?.type === 'Cartão de Crédito' && !a.arquivado);
+    if (!creditCards.length) return;
 
     let despesas = [...(appState.planningData.despesas || [])];
     let hasChanged = false;
 
-    despesas = despesas.filter(d => {
-        if (!d.isAutomatic) return true; 
-        return creditCards.some(card => card.id === d.cardId);
-    });
+    despesas = despesas.filter(d => !d.isAutomatic || creditCards.some(c => c.id === d.cardId));
 
     for (const card of creditCards) {
-        // Lógica de previsão: Planejamento do Mês M usa a fatura que fecha no Mês M.
-        const invoiceDetails = calculateInvoiceDetailsGlobal(card.id, false); 
-        const invoiceTotal = invoiceDetails.openInvoiceTotal || 0;
-        const invoiceKey = invoiceDetails.invoiceKey;
-
+        const invoiceDetails = calculateInvoiceDetailsGlobal(card.id, false);
         const existingInvoiceIndex = despesas.findIndex(d => d.cardId === card.id && d.isAutomatic);
 
         if (existingInvoiceIndex > -1) {
-            if (despesas[existingInvoiceIndex].value !== invoiceTotal || despesas[existingInvoiceIndex].invoiceKey !== invoiceKey) {
-                despesas[existingInvoiceIndex].value = invoiceTotal;
-                despesas[existingInvoiceIndex].invoiceKey = invoiceKey;
+            if (despesas[existingInvoiceIndex].value !== invoiceDetails.openInvoiceTotal) {
+                despesas[existingInvoiceIndex].value = invoiceDetails.openInvoiceTotal;
                 hasChanged = true;
             }
-        } else {
-            if (invoiceTotal > 0) {
-                despesas.push({
-                    description: `Fatura ${card.name}`,
-                    value: invoiceTotal,
-                    paid: false,
-                    isAutomatic: true,
-                    cardId: card.id,
-                    invoiceKey: invoiceKey
-                });
-                hasChanged = true;
-            }
+        } else if (invoiceDetails.openInvoiceTotal > 0) {
+            despesas.push({
+                description: `Fatura ${card.name}`,
+                value: invoiceDetails.openInvoiceTotal,
+                paid: false, isAutomatic: true, cardId: card.id
+            });
+            hasChanged = true;
         }
     }
 
@@ -92,49 +71,29 @@ export async function syncAutomaticInvoices() {
     }
 }
 
-
 export async function syncInvoiceValue(index, cardId) {
-    // Lógica de previsão: Sincroniza usando o mês atual como referência.
-    const invoiceDetails = calculateInvoiceDetailsGlobal(cardId, false);
-    const invoiceTotal = invoiceDetails.openInvoiceTotal || 0;
-    
+    const invoiceTotal = calculateInvoiceDetailsGlobal(cardId, false).openInvoiceTotal;
     const item = appState.planningData.despesas[parseInt(index)];
     if(item) {
         item.value = invoiceTotal;
-
-        const inputField = document.querySelector(`.planning-input[data-type="despesas"][data-index="${index}"][data-field="value"]`);
-        if (inputField) {
-            inputField.value = invoiceTotal.toFixed(2);
-        }
-
+        const inputField = document.querySelector(`.planning-input[data-index="${index}"][data-field="value"]`);
+        if (inputField) inputField.value = invoiceTotal.toFixed(2);
         updateSummaryGlobal();
-        
         showToast(`Fatura ${findItemNameGlobal(cardId, 'accounts')} sincronizada!`, 'success');
-
         await savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
     }
 }
 
-
 export function addPlanningItem(type) {
     if (!appState.planningData[type]) appState.planningData[type] = [];
-    
-    const newItem = type === 'despesas'
-        ? { description: '', value: '', paid: false }
-        : { description: '', value: '' };
-
+    const newItem = type === 'despesas' ? { description: '', value: 0, paid: false } : { description: '', value: 0 };
     appState.planningData[type].push(newItem);
     savePlanningDataGlobal(appState.planningData, appState.currentMonthYear); 
-    renderCurrentViewGlobal().then(() => {
-        const inputs = document.querySelectorAll(`.planning-input[data-type="${type}"]`);
-        if (inputs.length > 0) {
-            inputs[inputs.length - 2]?.focus(); 
-        }
-    });
+    renderCurrentViewGlobal();
 }
 
 export function deletePlanningItem(type, index) {
-    if (appState.planningData[type] && appState.planningData[type][index]) {
+    if (appState.planningData[type]?.[index]) {
         appState.planningData[type].splice(index, 1);
         savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
         renderCurrentViewGlobal();
@@ -146,56 +105,45 @@ export function attachPlanningKeydownListener(viewContainer, elementRefs) {
         if (e.key !== 'Enter' || !e.target.classList.contains('planning-input')) return;
         e.preventDefault();
         const input = e.target;
-        const parentItem = input.closest('.planning-item');
         const { type } = input.dataset;
-        
         if (input.closest('.planning-input-description')) {
-            parentItem.querySelector('.planning-input-value input')?.focus();
+            input.closest('.planning-item').querySelector('.planning-input-value input')?.focus();
         } else if (input.closest('.planning-input-value')) {
             addPlanningItem(type);
         }
     };
     elementRefs.planningKeydownListener = listener;
-    viewContainer.addEventListener('keydown', elementRefs.planningKeydownListener);
+    viewContainer.addEventListener('keydown', listener);
 }
 
-// ======================================================================
-// LÓGICA DE FATURAS
-// ======================================================================
-
 export function calculateCreditCardUsage(cardId) {
-    const cardTransactions = appState.allTransactions.filter(t => t && t.accountId === cardId);
-    const totalSpent = cardTransactions.filter(t => t.type === 'Saída').reduce((sum, t) => sum + t.value, 0);
-    const totalPaid = cardTransactions.filter(t => t.type === 'Pagamento de Fatura').reduce((sum, t) => sum + t.value, 0);
+    const cardTransactions = appState.allTransactions.filter(t => t?.accountId === cardId);
+    const totalSpent = cardTransactions.filter(t => t.type === 'Saída').reduce((s, t) => s + t.value, 0);
+    const totalPaid = cardTransactions.filter(t => t.type === 'Pagamento de Fatura').reduce((s, t) => s + t.value, 0);
     return totalSpent - totalPaid;
 }
 
 export function isInvoicePaid(cardId, invoiceMonthYear) {
-    return appState.allTransactions.some(t => t && t.type === 'Pagamento de Fatura' && t.destinationAccountId === cardId && t.invoiceMonthYear === invoiceMonthYear);
+    return appState.allTransactions.some(t => t?.type === 'Pagamento de Fatura' && t.destinationAccountId === cardId && t.invoiceMonthYear === invoiceMonthYear);
 }
 
-export function calculateInvoiceDetails(cardId, referenceDateOrUseCurrent) {
-    const card = appState.accounts.find(a => a && a.id === cardId);
-    if (!card || !card.closingDay) return { openInvoiceTotal: 0, invoiceKey: '' };
+export function calculateInvoiceDetails(cardId, useCurrentDate = false) {
+    const card = appState.accounts.find(a => a?.id === cardId);
+    if (!card?.closingDay) return { openInvoiceTotal: 0, invoiceKey: '' };
     
-    let referenceDate;
-    if (referenceDateOrUseCurrent === true) {
-        referenceDate = new Date();
-    } else if (referenceDateOrUseCurrent instanceof Date) {
-        referenceDate = referenceDateOrUseCurrent;
-    } else {
-        const [month, year] = appState.currentMonthYear.split('-');
-        referenceDate = new Date(year, month - 1, 15);
-    }
+    const referenceDate = useCurrentDate 
+        ? new Date() 
+        : getDateObject(new Date(appState.currentMonthYear.split('-')[1], appState.currentMonthYear.split('-')[0] - 1, 15));
 
     const invoiceKey = getInvoiceKeyForDate(referenceDate, card);
+    const transactions = appState.allTransactions.filter(t => {
+        if (t?.accountId !== cardId || t.type !== 'Saída') return false;
+        const transactionInvoiceKey = getInvoiceKeyForDate(getDateObject(t.date), card);
+        return transactionInvoiceKey === invoiceKey;
+    });
 
-    const transactionsForInvoice = appState.allTransactions
-        .filter(t => t && t.accountId === cardId && t.type === 'Saída')
-        .filter(t => getInvoiceKeyForDate(getDateObject(t.date), card) === invoiceKey);
-
-    const totalExpenses = transactionsForInvoice.reduce((sum, t) => sum + (t.value || 0), 0);
-    return { openInvoiceTotal: totalExpenses, invoiceKey };
+    const total = transactions.reduce((s, t) => s + (t.value || 0), 0);
+    return { openInvoiceTotal: total, invoiceKey };
 }
 
 export function postRenderInvoices(getTransactionHtmlFunc) {
@@ -204,175 +152,72 @@ export function postRenderInvoices(getTransactionHtmlFunc) {
     const detailsContainer = document.getElementById('invoice-details-container');
     if (!cardSelector) return;
 
-    const renderInvoice = () => {
+    const render = () => {
         const cardId = cardSelector.value;
-        const card = appState.accounts.find(a => a && a.id === cardId);
-        if (!card) {
-            detailsContainer.innerHTML = '<div class="empty-state"><p>Selecione um cartão.</p></div>';
-            return;
-        }
+        const card = appState.accounts.find(a => a.id === cardId);
+        if (!card) return;
         
-        const currentOpenInvoiceDetails = calculateInvoiceDetails(cardId, true);
-        const currentOpenInvoiceKey = currentOpenInvoiceDetails.invoiceKey;
-
-        const transactionsByInvoice = appState.allTransactions
-            .filter(t => t && t.accountId === cardId && t.type === 'Saída')
-            .reduce((acc, t) => {
-                const key = getInvoiceKeyForDate(getDateObject(t.date), card);
-                if (!acc[key]) acc[key] = [];
-                acc[key].push(t);
-                return acc;
-            }, {});
+        const openInvoiceKey = calculateInvoiceDetails(cardId, true).invoiceKey;
+        const transByInvoice = appState.allTransactions.filter(t => t?.accountId === cardId && t.type === 'Saída').reduce((acc, t) => {
+            const key = getInvoiceKeyForDate(getDateObject(t.date), card);
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(t);
+            return acc;
+        }, {});
             
-        if (currentOpenInvoiceKey && !transactionsByInvoice[currentOpenInvoiceKey]) {
-            transactionsByInvoice[currentOpenInvoiceKey] = [];
+        if (openInvoiceKey && !transByInvoice[openInvoiceKey]) transByInvoice[openInvoiceKey] = [];
+        const sortedPeriods = Object.keys(transByInvoice).sort((a, b) => new Date(b.split('-')[1], b.split('-')[0]-1) - new Date(a.split('-')[1], a.split('-')[0]-1));
+        
+        periodSelector.innerHTML = sortedPeriods.map(p => `<option value="${p}">${capitalizeFirstLetter(new Date(p.split('-')[1], p.split('-')[0]-1, 1).toLocaleString('pt-BR', { month: 'long' }))} de ${p.split('-')[1]}</option>`).join('');
+        
+        if (!periodSelector.value) {
+            periodSelector.value = openInvoiceKey;
         }
-
-        const sortedPeriods = Object.keys(transactionsByInvoice).sort((a, b) => {
-            const [mA, yA] = a.split('-');
-            const [mB, yB] = b.split('-');
-            const dateA = new Date(yA, mA - 1);
-            const dateB = new Date(yB, mB - 1);
-            return dateB - dateA;
-        });
         
-        const lastSelectedPeriod = periodSelector.value;
-        periodSelector.innerHTML = sortedPeriods.map(p => {
-            const [month, year] = p.split('-');
-            const date = new Date(year, month - 1, 1);
-            const monthName = capitalizeFirstLetter(date.toLocaleString('pt-BR', { month: 'long' }));
-            return `<option value="${p}">${monthName} de ${year}</option>`;
-        }).join('');
-
-        periodSelector.value = sortedPeriods.includes(lastSelectedPeriod) ? lastSelectedPeriod : currentOpenInvoiceKey;
-        
-        const currentPeriodKey = periodSelector.value;
-        if (!currentPeriodKey) {
-            detailsContainer.innerHTML = '<div class="empty-state"><i class="fa-solid fa-ghost"></i><p>Nenhuma fatura para este cartão.</p></div>';
+        const periodKey = periodSelector.value;
+        if (!periodKey) {
+            detailsContainer.innerHTML = '<div class="empty-state"><p>Nenhuma fatura para este cartão.</p></div>';
             return;
         }
 
-        const transactionsForPeriod = transactionsByInvoice[currentPeriodKey] || [];
-        transactionsForPeriod.sort((a, b) => getDateObject(b.date) - getDateObject(a.date));
-        const invoiceTotal = transactionsForPeriod.reduce((sum, t) => sum + t.value, 0);
-        const isPaid = isInvoicePaid(cardId, currentPeriodKey);
+        const periodTrans = (transByInvoice[periodKey] || []).sort((a,b) => getDateObject(b.date) - getDateObject(a.date));
+        const total = periodTrans.reduce((s, t) => s + t.value, 0);
+        const paid = isInvoicePaid(cardId, periodKey);
+        const [month, year] = periodKey.split('-');
         
-        const [month, year] = currentPeriodKey.split('-');
-        let dueDate = null;
-        if (card.dueDate) {
-            // Vencimento é no mês seguinte ao fechamento
-            dueDate = new Date(year, parseInt(month, 10), card.dueDate);
+        const dueDate = new Date(year, parseInt(month, 10) - 1, card.dueDate);
+        const closingDate = new Date(year, parseInt(month, 10) - 1, card.closingDay);
+        if (card.dueDate && card.closingDay && closingDate > dueDate) {
+            dueDate.setMonth(dueDate.getMonth() + 1);
         }
         
         detailsContainer.innerHTML = `
         <div class="card-details">
-            <div class="detail-row">
-                <span class="label"><strong>Total da Fatura</strong></span>
-                <span class="value negative">${formatCurrency(invoiceTotal)}</span>
-            </div>
-            ${dueDate ? `
-            <div class="detail-row">
-                <span class="label">Vencimento</span>
-                <span class="value">${dueDate.toLocaleDateString('pt-BR')}</span>
-            </div>` : ''}
-            <div class="detail-row">
-                <span class="label">Status</span>
-                <span class="value ${isPaid ? 'positive' : 'negative'}">${isPaid ? 'Paga' : 'Aberta'}</span>
-            </div>
-            <div style="display: flex; gap: 12px; margin-top: 16px; flex-wrap: wrap;">
-                ${!isPaid && invoiceTotal > 0 ? `<button class="button-primary" data-action="pay-invoice" data-card-id="${cardId}" data-invoice-total="${invoiceTotal}" data-invoice-key="${currentPeriodKey}"><i class="fa-solid fa-dollar-sign"></i> Pagar Fatura</button>` : ''}
-            </div>
+            <div class="detail-row"><span><strong>Total</strong></span><span class="value negative">${formatCurrency(total)}</span></div>
+            ${card.dueDate ? `<div class="detail-row"><span>Vencimento</span><span>${dueDate.toLocaleDateString('pt-BR')}</span></div>` : ''}
+            <div class="detail-row"><span>Status</span><span class="value ${paid ? 'positive':'negative'}">${paid ? 'Paga':'Aberta'}</span></div>
+            <div style="margin-top: 16px;">${!paid && total > 0 ? `<button class="button-primary" data-action="pay-invoice" data-card-id="${cardId}" data-invoice-total="${total}" data-invoice-key="${periodKey}"><i class="fa-solid fa-dollar-sign"></i> Pagar Fatura</button>` : ''}</div>
         </div>
-        <h4 class="invoice-transaction-header" style="margin-top: 1.5rem;">Lançamentos</h4>
-        <div class="transaction-list compact">${transactionsForPeriod.map(t => getTransactionHtmlFunc(t, false)).join('') || '<div class="empty-state small"><p>Nenhum lançamento neste período.</p></div>'}</div>`;
+        <h4 style="margin-top: 1.5rem;">Lançamentos</h4>
+        <div class="transaction-list compact">${periodTrans.length > 0 ? periodTrans.map(t => getTransactionHtmlFunc(t, false)).join('') : '<div class="empty-state small"><p>Nenhum lançamento.</p></div>'}</div>`;
     };
     
-    cardSelector.onchange = renderInvoice;
-    periodSelector.onchange = renderInvoice;
-    renderInvoice();
+    cardSelector.onchange = render;
+    periodSelector.onchange = render;
+    render();
 }
-
-
-// ======================================================================
-// LÓGICA DE OCR, RELATÓRIOS E APARÊNCIA
-// ======================================================================
 
 export async function adjustAccountBalance(accountId) {
     const account = appState.accounts.find(acc => acc.id === accountId);
     if (!account) return;
-
     const newBalanceStr = prompt('Digite o novo saldo correto:', account.balance);
-
     if (newBalanceStr !== null) {
         const newBalance = parseFloat(newBalanceStr.replace(',', '.'));
-        if (isNaN(newBalance)) {
-            showToast('Valor inválido.', 'error');
-            return;
-        }
-
-        const oldBalance = parseFloat(account.balance) || 0;
-        const adjustmentValue = newBalance - oldBalance;
-
-        if (adjustmentValue === 0) {
-            showToast('O saldo informado é o mesmo que o atual.', 'info');
-            return;
-        }
-
-        const transactionType = adjustmentValue > 0 ? 'Entrada' : 'Saída';
-        const transactionValue = Math.abs(adjustmentValue);
-
-        const adjustmentTransaction = {
-            accountId: accountId,
-            date: firebase.firestore.Timestamp.now(),
-            monthYear: `${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getFullYear()}`,
-            description: "Ajuste de Saldo",
-            type: transactionType,
-            value: transactionValue,
-            categoryId: ''
-        };
-
-        const batch = db.batch();
+        if (isNaN(newBalance)) return showToast('Valor inválido.', 'error');
         try {
-            const accountRef = db.collection('financeiro_contas').doc(accountId);
-            batch.update(accountRef, { balance: newBalance });
-
-            const transactionRef = db.collection('financeiro_lancamentos').doc();
-            batch.set(transactionRef, adjustmentTransaction);
-
-            await batch.commit();
-            showToast('Saldo ajustado e movimentação registrada!', 'success');
-        } catch (error) {
-            console.error("Erro ao ajustar saldo:", error);
-            showToast('Ocorreu um erro ao ajustar o saldo.', 'error');
-        }
-    }
-}
-
-export async function seedDefaultOcrRules() {
-    const defaultRules = [
-        { name: 'Valor Padrão (R$)', type: 'value', pattern: 'R\\$\\s*([\\d.,]+)', priority: 1, enabled: true },
-        { name: 'Data PicPay (dd/mes/yyyy)', type: 'date', pattern: '(\\d{1,2})\\/(\\w+)\\/(\\d{4})', priority: 1, enabled: true },
-        { name: 'Data Willbank (dd/mm/yyyy)', type: 'date', pattern: '(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})', priority: 2, enabled: true },
-        { name: 'Data Nubank (dd MMM yyyy)', type: 'date', pattern: '(\\d{1,2})\\s+(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)\\.?\\s+(\\d{4})', priority: 3, enabled: true },
-        { name: 'Estabelecimento PicPay', type: 'description', pattern: 'Local da transação:\\s*\\n(.+)', priority: 1, enabled: true },
-        { name: 'Estabelecimento Nubank', type: 'description', pattern: 'Estabelecimento\\s(.+)', priority: 2, enabled: true },
-        { name: 'Destinatário PIX', type: 'description', pattern: 'Destinatário\\s*\\n(.+)', priority: 3, enabled: true },
-        { name: 'Descrição Genérica (Topo)', type: 'description', pattern: '^([A-Z\\s]{5,50})$', priority: 10, enabled: true },
-        { name: 'Parcelas (x/y)', type: 'installments', pattern: 'parcela\\s\\d{1,2}\\s*\\/\\s*(\\d{1,2})', priority: 1, enabled: true },
-        { name: 'À Vista', type: 'installments', pattern: '(à vista)', priority: 2, enabled: true },
-    ];
-
-    const batch = db.batch();
-    defaultRules.forEach(rule => {
-        const docRef = db.collection('financeiro_regras_ocr').doc();
-        batch.set(docRef, rule);
-    });
-
-    try {
-        await batch.commit();
-        showToast('Regras padrão do leitor de comprovantes foram criadas!', 'success');
-    } catch (error) {
-        console.error("Erro ao criar regras padrão de OCR:", error);
+            await db.collection('financeiro_contas').doc(accountId).update({ balance: newBalance });
+            showToast('Saldo ajustado!', 'success');
+        } catch (error) { showToast('Erro ao ajustar o saldo.', 'error'); }
     }
 }
 
@@ -383,30 +228,28 @@ export function launchOcr(renderFormFunc) {
     fileInput.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-
         const ocrButton = document.querySelector('[data-action="launch-ocr"]');
-        const originalBtnHtml = ocrButton.innerHTML;
+        const originalHtml = ocrButton.innerHTML;
         ocrButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i><span>Processando...</span>`;
         ocrButton.disabled = true;
-
         try {
             const { data: { text } } = await Tesseract.recognize(file, 'por');
-            console.log("Texto extraído:", text);
-            
-            const extractedData = parseReceiptText(text);
-
-            if (Object.keys(extractedData).length > 0) {
-                showToast('Dados extraídos com sucesso!', 'success');
-                renderFormFunc('saida', extractedData);
-            } else {
-                showToast('Não foi possível extrair os dados. Tente um comprovante mais nítido.', 'error');
+            const data = parseReceiptText(text);
+            renderFormFunc('saida', data);
+            if (data.description) {
+                setTimeout(() => {
+                    const form = document.getElementById('lancar-form');
+                    if (form) handleDescriptionChange(data.description, form);
+                }, 100);
             }
-
+            if (Object.keys(data).length === 0) {
+                 showToast('Não foi possível extrair dados do comprovante.', 'error');
+            }
         } catch (error) {
             console.error("Erro no OCR:", error);
-            showToast('Ocorreu um erro ao ler o comprovante.', 'error');
+            showToast('Erro ao ler o comprovante.', 'error');
         } finally {
-            ocrButton.innerHTML = originalBtnHtml;
+            ocrButton.innerHTML = originalHtml;
             ocrButton.disabled = false;
         }
     };
@@ -415,174 +258,104 @@ export function launchOcr(renderFormFunc) {
 
 export function parseReceiptText(text) {
     const data = {};
-    const typesToExtract = ['value', 'date', 'description', 'installments', 'account'];
-
-    typesToExtract.forEach(type => {
-        const relevantRules = (appState.ocrRules || [])
-            .filter(r => r.type === type && r.enabled)
-            .sort((a, b) => (a.priority || 99) - (b.priority || 99));
-
-        for (const rule of relevantRules) {
-            try {
-                if (data[type]) break;
-
-                const regex = new RegExp(rule.pattern, 'i');
-                const match = text.match(regex);
-
-                if (match) {
-                    if (type === 'account') {
-                        data.accountId = rule.accountId;
-                    } else if (type === 'value' && match[1]) {
-                        data.value = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-                    } else if (type === 'description' && match[1]) {
-                        data.description = match[1].trim().split('\n')[0];
-                    } else if (type === 'installments' && match[1]) {
-                        data.installments = rule.name.includes('À Vista') ? 1 : parseInt(match[1], 10);
-                    } else if (type === 'date' && match[1] && match[2] && match[3]) {
-                        const day = match[1].padStart(2, '0');
-                        const monthStr = match[2].toLowerCase().replace('.', '');
-                        const year = match[3];
-                        const monthMap = { jan: '01', janeiro: '01', fev: '02', fevereiro: '02', mar: '03', março: '03', abr: '04', abril: '04', mai: '05', maio: '05', jun: '06', junho: '06', jul: '07', julho: '07', ago: '08', agosto: '08', set: '09', setembro: '09', out: '10', outubro: '10', nov: '11', novembro: '11', dez: '12', dezembro: '12' };
-                        const month = monthStr.match(/^\d+$/) ? monthStr.padStart(2, '0') : monthMap[monthStr];
-                        if (day && month && year) {
-                            data.date = `${year}-${month}-${day}`;
-                        }
-                    }
+    const types = ['value', 'date', 'description', 'installments'];
+    types.forEach(type => {
+        const rules = (appState.ocrRules || []).filter(r => r.type === type && r.enabled).sort((a,b) => (a.priority || 99) - (b.priority || 99));
+        for (const rule of rules) {
+            if (data[type]) break;
+            const match = text.match(new RegExp(rule.pattern, 'i'));
+            if (match && match[1]) {
+                if (type === 'value') data.value = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+                else if (type === 'description') data.description = match[1].trim().split('\n')[0];
+                else if (type === 'installments') data.installments = rule.name.includes('Vista') ? 1 : parseInt(match[1], 10);
+                else if (type === 'date' && match.length > 3) {
+                    const monthMap = { jan:'01', fev:'02', mar:'03', abr:'04', mai:'05', jun:'06', jul:'07', ago:'08', set:'09', out:'10', nov:'11', dez:'12' };
+                    const monthStr = match[2].toLowerCase().replace('.','');
+                    const month = monthStr.match(/^\d+$/) ? monthStr.padStart(2, '0') : monthMap[monthStr];
+                    if (month) data.date = `${match[3]}-${month}-${match[1].padStart(2, '0')}`;
                 }
-            } catch (e) {
-                console.error(`Regra OCR inválida: ${rule.name}`, e);
             }
         }
     });
-
     return data;
 }
 
-export function handleDescriptionChange(description, form, showAddAliasModalFunc) {
+export function handleDescriptionChange(description, form) {
     const establishmentSelect = form.querySelector('select[name="establishmentId"]');
-    const associationContainer = form.querySelector('#association-helper-container');
-    const descriptionInput = form.querySelector('input[name="description"]');
-
-    if (!establishmentSelect || !associationContainer || !descriptionInput) return;
+    if (!establishmentSelect || !description) return;
 
     const normalizedText = description.trim().toLowerCase();
-    associationContainer.innerHTML = '';
-    establishmentSelect.value = '';
+    
+    let bestMatch = null;
 
-    if (!normalizedText) return;
-
-    for (const establishment of appState.establishments) {
-        if (establishment.aliases && establishment.aliases.length > 0) {
-            for (const alias of establishment.aliases) {
-                if (alias && (normalizedText.includes(alias) || normalizedText === alias)) {
-                    descriptionInput.value = establishment.name;
-                    establishmentSelect.value = establishment.id;
-                    handleEstablishmentChange(establishment.id, form);
-                    return;
+    for (const est of appState.establishments) {
+        const aliases = (est.aliases || []).map(a => a.toLowerCase().trim()).filter(Boolean);
+        for (const alias of aliases) {
+            if (normalizedText.includes(alias)) {
+                if (!bestMatch || alias.length > bestMatch.alias.length) {
+                    bestMatch = { establishmentId: est.id, alias: alias };
                 }
             }
         }
     }
-
-    const directMatch = appState.establishments.find(e => e.name.trim().toLowerCase() === normalizedText);
-    if (directMatch) {
-        descriptionInput.value = directMatch.name;
-        establishmentSelect.value = directMatch.id;
-        handleEstablishmentChange(directMatch.id, form);
-        return;
-    }
-
-    if (appState.establishments.length > 0) {
-        associationContainer.innerHTML = `<button type="button" class="button-secondary" data-action="show-add-alias-modal" data-description="${description.trim()}" style="width: 100%; margin-top: 8px;"><i class="fa-solid fa-link"></i> Associar "${description.trim()}" a um estabelecimento?</button>`;
+    
+    if (bestMatch) {
+        establishmentSelect.value = bestMatch.establishmentId;
+        handleEstablishmentChange(bestMatch.establishmentId, form);
     }
 }
 
 export function handleEstablishmentChange(establishmentId, form) {
     const categorySelect = form.querySelector('select[name="categoryId"]');
-    if (!establishmentId || !categorySelect) return;
-
+    if (!categorySelect) return;
     const establishment = appState.establishments.find(e => e.id === establishmentId);
-    if (establishment && establishment.categoriaPadraoId) {
-        if (!categorySelect.value) {
-            categorySelect.value = establishment.categoriaPadraoId;
-        }
+    if (establishment?.categoriaPadraoId && !categorySelect.value) {
+        categorySelect.value = establishment.categoriaPadraoId;
     }
 }
 
-
 export function setupReportGenerator(generateReportFunc) {
-    const reportGenerator = document.getElementById('report-generator');
-    if (!reportGenerator) return;
+    const form = document.getElementById('report-generator');
+    if (!form) return;
+    const typeSelector = form.querySelector('#report-type-selector');
+    const itemSelector = form.querySelector('#report-item-selector');
+    const keywordInput = form.querySelector('#report-keyword-input');
+    const dateStartInput = form.querySelector('#report-date-start');
+    const dateEndInput = form.querySelector('#report-date-end');
 
-    const typeSelector = document.getElementById('report-type-selector');
-    const itemSelector = document.getElementById('report-item-selector');
-    const keywordInput = document.getElementById('report-keyword-input');
-    const dateStartInput = document.getElementById('report-date-start');
-    const dateEndInput = document.getElementById('report-date-end');
-    const generateBtn = document.getElementById('generate-report-btn');
-
-    const updateItemSelector = () => {
+    const updateUI = () => {
         const type = typeSelector.value;
-        itemSelector.innerHTML = '';
-        keywordInput.classList.add('hidden');
-        itemSelector.classList.remove('hidden');
-
+        const isKeyword = type === 'keyword';
+        itemSelector.classList.toggle('hidden', isKeyword);
+        keywordInput.classList.toggle('hidden', !isKeyword);
+        if (isKeyword) return;
+        
         let items = [];
-        switch (type) {
-            case 'category': items = appState.categories; break;
-            case 'person': items = appState.people; break;
-            case 'establishment': items = appState.establishments; break;
-            case 'account': items = appState.accounts; break;
-            case 'keyword':
-                itemSelector.classList.add('hidden');
-                keywordInput.classList.remove('hidden');
-                return;
-        }
-        items.sort((a,b) => a.name.localeCompare(b.name)).forEach(item => {
-            const option = document.createElement('option');
-            option.value = item.id;
-            option.textContent = item.name;
-            itemSelector.appendChild(option);
-        });
+        if (type === 'category') items = appState.categories;
+        else if (type === 'person') items = appState.people;
+        else if (type === 'establishment') items = appState.establishments;
+        else if (type === 'account') items = appState.accounts;
+        
+        itemSelector.innerHTML = items.sort((a,b) => a.name.localeCompare(b.name)).map(i => `<option value="${i.id}">${i.name}</option>`).join('');
     };
 
-    typeSelector.onchange = updateItemSelector;
-    generateBtn.onclick = generateReportFunc;
+    typeSelector.onchange = updateUI;
+    form.querySelector('#generate-report-btn').onclick = generateReportFunc;
     
-    const savedFiltersJSON = localStorage.getItem('lastReportFilters');
-    if (savedFiltersJSON) {
-        const savedFilters = JSON.parse(savedFiltersJSON);
-        dateStartInput.value = savedFilters.startDate;
-        dateEndInput.value = savedFilters.endDate;
-        typeSelector.value = savedFilters.type;
-        updateItemSelector();
-        setTimeout(() => { 
-            if (savedFilters.type === 'keyword') {
-                keywordInput.value = savedFilters.keyword;
-            } else {
-                itemSelector.value = savedFilters.itemId;
-            }
-        }, 0);
+    const saved = JSON.parse(localStorage.getItem('lastReportFilters'));
+    if (saved) {
+        dateStartInput.value = saved.startDate;
+        dateEndInput.value = saved.endDate;
+        typeSelector.value = saved.type;
+        updateUI();
+        if (saved.type === 'keyword') keywordInput.value = saved.keyword;
+        else itemSelector.value = saved.itemId;
     } else {
-        const today = getLocalISODate();
-        dateStartInput.value = today;
-        dateEndInput.value = today;
-        updateItemSelector();
+        const today = new Date();
+        dateStartInput.value = getLocalISODate(new Date(today.getFullYear(), today.getMonth(), 1));
+        dateEndInput.value = getLocalISODate(today);
+        updateUI();
     }
-
-    reportGenerator.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && e.target.tagName !== 'BUTTON') {
-            e.preventDefault();
-            const fields = Array.from(reportGenerator.querySelectorAll('input:not(.hidden), select:not(.hidden)'));
-            const currentIndex = fields.indexOf(e.target);
-            const nextField = fields[currentIndex + 1];
-            if (nextField) {
-                nextField.focus();
-            } else {
-                generateBtn.click();
-            }
-        }
-    });
 }
 
 export function generateReport(showReportModalFunc) {
@@ -592,72 +365,49 @@ export function generateReport(showReportModalFunc) {
     const startDateStr = document.getElementById('report-date-start').value;
     const endDateStr = document.getElementById('report-date-end').value;
     
-    const reportFilters = { type, itemId, keyword, startDate: startDateStr, endDate: endDateStr };
-    localStorage.setItem('lastReportFilters', JSON.stringify(reportFilters));
-
+    localStorage.setItem('lastReportFilters', JSON.stringify({ type, itemId, keyword, startDate: startDateStr, endDate: endDateStr }));
     const startDate = new Date(startDateStr + 'T00:00:00');
     const endDate = new Date(endDateStr + 'T23:59:59');
 
-    if (!startDate.valueOf() || !endDate.valueOf() || startDate > endDate) {
-        showToast('Por favor, selecione um período de datas válido.', 'error');
-        return;
-    }
+    if (!startDate.valueOf() || !endDate.valueOf() || startDate > endDate) return showToast('Período de datas inválido.', 'error');
 
-    let filteredTransactions = appState.allTransactions.filter(t => {
+    let transactions = appState.allTransactions.filter(t => {
         const tDate = getDateObject(t.date);
         return tDate >= startDate && tDate <= endDate;
     });
 
-    let reportTitle = '';
-
-    switch (type) {
-        case 'category':
-            reportTitle = `Relatório de Saídas: ${findItemNameGlobal(itemId, 'categories')}`;
-            filteredTransactions = filteredTransactions.filter(t => t.categoryId === itemId && t.type === 'Saída');
-            break;
-        case 'person':
-            reportTitle = `Relatório de Transações: ${findItemNameGlobal(itemId, 'people')}`;
-            filteredTransactions = filteredTransactions.filter(t => t.personId === itemId);
-            break;
-        case 'establishment':
-            reportTitle = `Relatório de Transações: ${findItemNameGlobal(itemId, 'establishments')}`;
-            filteredTransactions = filteredTransactions.filter(t => t.establishmentId === itemId);
-            break;
-        case 'account':
-            reportTitle = `Relatório de Transações: ${findItemNameGlobal(itemId, 'accounts')}`;
-            filteredTransactions = filteredTransactions.filter(t => t.accountId === itemId);
-            break;
-        case 'keyword':
-            if (!keyword) {
-                showToast('Por favor, digite uma palavra-chave para buscar.', 'error');
-                return;
-            }
-            reportTitle = `Relatório por Palavra-Chave: "${keyword}"`;
-            filteredTransactions = filteredTransactions.filter(t => t.description && t.description.toLowerCase().includes(keyword));
-            break;
+    let title = 'Relatório';
+    if (type === 'category') {
+        title = `Saídas: ${findItemNameGlobal(itemId, 'categories')}`;
+        transactions = transactions.filter(t => t.categoryId === itemId && t.type === 'Saída');
+    } else if (type === 'person') {
+        title = `Transações: ${findItemNameGlobal(itemId, 'people')}`;
+        transactions = transactions.filter(t => t.personId === itemId);
+    } else if (type === 'establishment') {
+        title = `Transações: ${findItemNameGlobal(itemId, 'establishments')}`;
+        transactions = transactions.filter(t => t.establishmentId === itemId);
+    } else if (type === 'account') {
+        title = `Transações: ${findItemNameGlobal(itemId, 'accounts')}`;
+        transactions = transactions.filter(t => t.accountId === itemId);
+    } else if (type === 'keyword') {
+        if (!keyword) return showToast('Digite uma palavra-chave.', 'error');
+        title = `Busca por: "${keyword}"`;
+        transactions = transactions.filter(t => t.description?.toLowerCase().includes(keyword));
     }
 
-    const totalIncome = filteredTransactions.filter(t => t.type === 'Entrada').reduce((sum, t) => sum + t.value, 0);
-    const totalExpense = filteredTransactions.filter(t => t.type === 'Saída').reduce((sum, t) => sum + t.value, 0);
-    const finalBalance = totalIncome - totalExpense;
-
-    const summary = { count: filteredTransactions.length, totalIncome, totalExpense, finalBalance };
+    const income = transactions.filter(t => t.type === 'Entrada').reduce((s, t) => s + t.value, 0);
+    const expense = transactions.filter(t => t.type === 'Saída').reduce((s, t) => s + t.value, 0);
+    const summary = { count: transactions.length, totalIncome: income, totalExpense: expense, finalBalance: income - expense };
     
-    appState.currentReport = { transactions: filteredTransactions, title: reportTitle, summary };
+    appState.currentReport = { transactions, title, summary };
     showReportModalFunc(appState.currentReport);
 }
 
-
 export function applySavedSettings() {
-    const savedFontSize = localStorage.getItem('appFontSize');
-    if (savedFontSize) {
-        document.documentElement.style.setProperty('--base-font-size', `${savedFontSize}px`);
-    }
-
-    const savedAnimationStyle = localStorage.getItem('appAnimationStyle');
-    if (savedAnimationStyle) {
-        updateAnimationSpeed(savedAnimationStyle);
-    }
+    const fontSize = localStorage.getItem('appFontSize');
+    if (fontSize) document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
+    const animationStyle = localStorage.getItem('appAnimationStyle');
+    if (animationStyle) updateAnimationSpeed(animationStyle);
 }
 
 export function updateAnimationSpeed(style) {
@@ -670,24 +420,17 @@ export function updateAnimationSpeed(style) {
 export function setupAppearanceSettings() {
     const fontSizeSlider = document.getElementById('font-size-slider');
     const animationSelector = document.getElementById('animation-style-selector');
-    
     if (!fontSizeSlider || !animationSelector) return;
     
-    const savedFontSize = localStorage.getItem('appFontSize') || '16';
-    fontSizeSlider.value = savedFontSize;
-    
-    const savedAnimationStyle = localStorage.getItem('appAnimationStyle') || 'sutil';
-    animationSelector.value = savedAnimationStyle;
+    fontSizeSlider.value = localStorage.getItem('appFontSize') || '16';
+    animationSelector.value = localStorage.getItem('appAnimationStyle') || 'sutil';
     
     fontSizeSlider.oninput = (e) => {
-        const newSize = e.target.value;
-        document.documentElement.style.setProperty('--base-font-size', `${newSize}px`);
-        localStorage.setItem('appFontSize', newSize);
+        document.documentElement.style.setProperty('--base-font-size', `${e.target.value}px`);
+        localStorage.setItem('appFontSize', e.target.value);
     };
-    
     animationSelector.onchange = (e) => {
-        const newStyle = e.target.value;
-        updateAnimationSpeed(newStyle);
-        localStorage.setItem('appAnimationStyle', newStyle);
+        updateAnimationSpeed(e.target.value);
+        localStorage.setItem('appAnimationStyle', e.target.value);
     };
 }

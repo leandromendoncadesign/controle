@@ -39,7 +39,6 @@ document.addEventListener('DOMContentLoaded', () => {
         closeModalTimeout: null, 
 
         init() {
-            console.log('App iniciando...');
             this.elements = {
                 body: document.body,
                 appRoot: document.getElementById('app-root'),
@@ -57,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
             if (!firebase.apps.length) firebase.initializeApp(this.config.firebase);
             this.db = firebase.firestore();
-            this.db.enablePersistence({ synchronizeTabs: true }).catch(err => console.log('Persistência não suportada: ', err));
+            this.db.enablePersistence({ synchronizeTabs: true }).catch(err => console.error('Persistência não suportada: ', err));
             
             DataHandlers.initDataHandlers(this.db, this.state);
             LogicManager.initLogicManager(
@@ -97,12 +96,8 @@ document.addEventListener('DOMContentLoaded', () => {
         
         handleFirebaseAuthError(code) {
             switch (code) {
-                case 'auth/user-not-found':
-                case 'auth/wrong-password':
-                case 'auth/invalid-credential':
-                    return 'Credenciais inválidas. Verifique seu e-mail e senha.';
-                default:
-                    return 'Ocorreu um erro desconhecido no login.';
+                case 'auth/user-not-found': case 'auth/wrong-password': case 'auth/invalid-credential': return 'Credenciais inválidas.';
+                default: return 'Ocorreu um erro desconhecido.';
             }
         },
 
@@ -137,6 +132,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const showLogin = () => {
                 this.elements.body.classList.remove('is-loading'); 
                 this.elements.authContainer.style.display = 'flex';
+                this.elements.authContainer.classList.add('is-visible');
                 document.getElementById('email-input')?.focus();
             };
             firebase.auth().onAuthStateChanged(user => user ? startApp() : showLogin());
@@ -144,10 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
         },
 
         handleLogout() {
-            firebase.auth().signOut().then(() => {
-                this.detachListeners();
-                window.location.reload(); 
-            });
+            firebase.auth().signOut().then(() => { this.detachListeners(); window.location.reload(); });
         },
         
         setCurrentMonthYear() {
@@ -160,94 +153,63 @@ document.addEventListener('DOMContentLoaded', () => {
             this.state.isLoading = true;
             this.detachListeners();
             const collections = {
-                'financeiro_contas': 'accounts',
-                'financeiro_categorias': 'categories',
-                'financeiro_pessoas': 'people',
-                'financeiro_estabelecimentos': 'establishments',
-                'financeiro_regras_ocr': 'ocrRules'
+                'financeiro_contas': 'accounts', 'financeiro_categorias': 'categories', 'financeiro_pessoas': 'people',
+                'financeiro_estabelecimentos': 'establishments', 'financeiro_regras_ocr': 'ocrRules'
             };
-            const promises = Object.entries(collections).map(([col, stateKey]) =>
-                new Promise(resolve => {
+            
+            const promises = Object.entries(collections).map(([col, key]) =>
+                new Promise(res => {
                     const listener = this.db.collection(col).onSnapshot(snap => {
-                        this.state[stateKey] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        resolve();
-                    });
+                        this.state[key] = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        if (!this.state.isLoading) { this.renderCurrentView(); }
+                        res();
+                    }, err => { console.error(`Erro ao buscar ${col}:`, err); res(); });
                     this.state.listeners.push(listener);
                 })
             );
-            const transactionsListener = this.db.collection('financeiro_lancamentos').orderBy('date', 'desc').onSnapshot(snapshot => {
-                this.state.allTransactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+            const transListener = this.db.collection('financeiro_lancamentos').orderBy('date', 'desc').onSnapshot(snap => {
+                this.state.allTransactions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                 this.populateMonthSelector();
-                Promise.all(promises).then(async () => {
-                    if (this.state.isLoading) {
-                        this.state.isLoading = false;
-                        if (!this.state.ocrRules?.length) await LogicManager.seedDefaultOcrRules();
-                        this.attachPlanningListener();
-                        this.render();
-                    } else {
-                        this.renderCurrentView();
-                    }
-                });
+                if (!this.state.isLoading) { this.renderCurrentView(); }
+            }, err => console.error("Erro ao buscar lançamentos:", err));
+            this.state.listeners.push(transListener);
+
+            Promise.all(promises).then(() => {
+                this.state.isLoading = false;
+                this.attachPlanningListener();
+                this.render();
             });
-            this.state.listeners.push(transactionsListener);
         },
         
         attachPlanningListener() {
             if (this.state.planningListener) this.state.planningListener();
-
-            // << CORREÇÃO 1: Nome do documento >>
             const docId = `planejamento_${this.state.currentMonthYear}`;
             const docRef = this.db.collection('financeiro_planejamento').doc(docId);
-            
             this.state.planningListener = docRef.onSnapshot(async (doc) => {
-                console.log(`Dados de planejamento para ${docId} sincronizados.`);
-                
-                // << CORREÇÃO 2: Estrutura dos dados >>
-                if (doc.exists && doc.data().planningData) {
-                    this.state.planningData = doc.data().planningData;
-                } else {
-                    this.state.planningData = { receitas: [], despesas: [] };
-                }
-                
+                const planningDoc = doc.data();
+                this.state.planningData = (doc.exists && planningDoc && planningDoc.planningData) ? planningDoc.planningData : { receitas: [], despesas: [] };
                 await LogicManager.syncAutomaticInvoices();
-                
-                if (this.state.currentView === 'planning') {
-                    UIRenderer.renderAllPlanningSections();
-                }
-            }, (error) => console.error("Erro no listener de planejamento:", error));
+                if (this.state.currentView === 'planning') UIRenderer.renderAllPlanningSections();
+            }, err => console.error("Erro no listener de planejamento:", err));
         },
 
         populateMonthSelector() {
-            const monthsSet = new Set();
-            this.state.allTransactions.forEach(t => {
-                if (t?.date) {
-                    const jsDate = Utils.getDateObject(t.date);
-                    monthsSet.add(`${(jsDate.getMonth() + 1).toString().padStart(2, '0')}-${jsDate.getFullYear()}`);
-                }
-            });
-            const now = new Date();
-            monthsSet.add(`${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`);
-            this.state.availableMonths = Array.from(monthsSet).sort((a, b) => {
-                const [mA, yA] = a.split('-');
-                const [mB, yB] = b.split('-');
-                return new Date(yB, mB - 1) - new Date(yA, mA - 1);
-            });
-            const selector = this.elements.monthYearSelector;
-            selector.innerHTML = this.state.availableMonths.map(monthYear => {
+            const monthsSet = new Set(this.state.allTransactions.map(t => t.monthYear).filter(Boolean));
+            monthsSet.add(`${(new Date().getMonth() + 1).toString().padStart(2, '0')}-${new Date().getFullYear()}`);
+            this.state.availableMonths = Array.from(monthsSet).sort((a, b) => new Date(b.split('-')[1], b.split('-')[0]-1) - new Date(a.split('-')[1], a.split('-')[0]-1));
+            this.elements.monthYearSelector.innerHTML = this.state.availableMonths.map(monthYear => {
                 const [month, year] = monthYear.split('-');
                 const monthName = Utils.capitalizeFirstLetter(new Date(year, month - 1, 1).toLocaleString('pt-BR', { month: 'long' }));
                 return `<option value="${monthYear}">${monthName} de ${year}</option>`;
             }).join('');
-            selector.value = this.state.currentMonthYear;
+            this.elements.monthYearSelector.value = this.state.currentMonthYear;
         },
 
         detachListeners() {
             this.state.listeners.forEach(unsubscribe => unsubscribe());
             this.state.listeners = [];
-            if (this.state.planningListener) {
-                this.state.planningListener();
-                this.state.planningListener = null;
-            }
+            if (this.state.planningListener) { this.state.planningListener(); this.state.planningListener = null; }
         },
 
         navigate(e, data = null) {
@@ -280,11 +242,10 @@ document.addEventListener('DOMContentLoaded', () => {
             this.renderCurrentView();
         },
 
-        async renderCurrentView() {
+        renderCurrentView() {
             const viewContainer = this.elements.viewContainer;
             if (this.elements.planningKeydownListener) {
                 viewContainer.removeEventListener('keydown', this.elements.planningKeydownListener);
-                this.elements.planningKeydownListener = null;
             }
             if (this.state.isLoading) {
                 viewContainer.innerHTML = `<div class="loading-spinner"></div>`;
@@ -298,9 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'movements': html = UIRenderer.getMovementsHtml(); break;
                 case 'accounts': html = UIRenderer.getAccountsHtml(); break;
                 case 'planning': html = UIRenderer.getPlanningHtml(); break;
-                case 'settings': 
-                    html = this.state.currentSubView ? UIRenderer.getSettingsSubmenuHtml(this.state.currentSubView) : UIRenderer.getSettingsHtml();
-                    break;
+                case 'settings': html = this.state.currentSubView ? UIRenderer.getSettingsSubmenuHtml(this.state.currentSubView) : UIRenderer.getSettingsHtml(); break;
                 default: html = UIRenderer.getResumosHtml();
             }
             viewContainer.innerHTML = html;
@@ -325,127 +284,150 @@ document.addEventListener('DOMContentLoaded', () => {
                 const menu = document.querySelector('.card-actions-menu:not(.hidden)');
                 if (menu && !e.target.closest('.card-actions-button')) menu.classList.add('hidden');
                 const item = e.target.closest('.transaction-list-item');
-                if (item && !e.target.closest('.delete-btn')) {
+                if (item && !e.target.closest('[data-action]')) { 
                     const trans = this.state.allTransactions.find(t => t.id === item.dataset.id);
                     if (trans) UIRenderer.showTransactionDetailsModal(trans);
                 }
                 return;
             }
-            const { action, id, type, index, cardId, chart, invoiceKey, submenu, description } = target.dataset;
+            const { action, id } = target.dataset;
             const actions = {
-                'navigate-to-submenu': () => { this.state.currentSubView = submenu; this.renderCurrentView(); },
+                'navigate-to-submenu': () => { this.state.currentSubView = target.dataset.submenu; this.renderCurrentView(); },
                 'navigate-back-from-submenu': () => { this.state.currentSubView = null; this.renderCurrentView(); },
                 'show-lancar-form': () => UIRenderer.renderLancamentoForm(target.dataset.formType),
-                'cancel-lancar-form': () => { document.getElementById('form-lancamento-container').innerHTML = ''; },
-                'change-chart-type': () => { this.state.dashboardChartType = chart; this.renderCurrentView(); },
-                'toggle-menu': () => { document.querySelectorAll('.card-actions-menu').forEach(m => { if (m.dataset.menuId !== id) m.classList.add('hidden'); }); document.querySelector(`.card-actions-menu[data-menu-id="${id}"]`)?.classList.toggle('hidden'); },
-                'toggle-archived': () => { this.state.showArchived = !this.state.showArchived; this.renderCurrentView(); },
-                'pay-invoice': () => this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => {} }, { formType: 'pagarFatura', prefill: { destinationAccountId: cardId, value: parseFloat(target.dataset.invoiceTotal), invoiceMonthYear: invoiceKey } }),
-                'edit-from-details': () => UIRenderer.showTransactionModal(id),
-                'add-account': () => UIRenderer.showAccountModal(),
-                'edit-account': () => UIRenderer.showAccountModal(id),
-                'delete-account': async () => { if(await DataHandlers.deleteItem('financeiro_contas', id, 'Conta')) this.closeModal(); },
-                'archive-account': () => { const acc = this.state.accounts.find(a => a.id === id); this.db.collection('financeiro_contas').doc(id).update({ arquivado: !acc.arquivado }); },
-                'adjust-balance': () => LogicManager.adjustAccountBalance(id),
-                'delete-transaction': async () => { const trans = this.state.allTransactions.find(t => t.id === id); if(await DataHandlers.deleteItem('financeiro_lancamentos', id, 'Lançamento', trans)) this.closeModal(); },
-                'show-filter-modal': () => UIRenderer.showFilterModal(),
-                'show-sort-modal': () => UIRenderer.showSortModal(),
-                'add-planning-item': () => LogicManager.addPlanningItem(type),
-                'delete-planning-item': () => LogicManager.deletePlanningItem(type, index),
-                'sync-invoice': () => LogicManager.syncInvoiceValue(index, cardId),
-                'add-category': () => UIRenderer.showCategoryModal(),
-                'edit-category': () => UIRenderer.showCategoryModal(id),
-                'delete-category': async () => { if(await DataHandlers.deleteItem('financeiro_categorias', id, 'Categoria')) this.closeModal(); },
-                'add-person': () => UIRenderer.showPersonModal(),
-                'edit-person': () => UIRenderer.showPersonModal(id),
-                'delete-person': async () => { if(await DataHandlers.deleteItem('financeiro_pessoas', id, 'Pessoa')) this.closeModal(); },
                 'add-establishment': () => UIRenderer.showEstablishmentModal(),
                 'edit-establishment': () => UIRenderer.showEstablishmentModal(id),
-                'delete-establishment': async () => { if(await DataHandlers.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento')) this.closeModal(); },
-                'show-add-alias-modal': () => UIRenderer.showAddAliasModal(description),
-                'launch-ocr': () => LogicManager.launchOcr(UIRenderer.renderLancamentoForm),
+                'delete-establishment': () => DataHandlers.deleteItem('financeiro_estabelecimentos', id, 'Estabelecimento'),
                 'add-ocr-rule': () => UIRenderer.showOcrRuleModal(),
                 'edit-ocr-rule': () => UIRenderer.showOcrRuleModal(id),
-                'delete-ocr-rule': async () => { if(await DataHandlers.deleteItem('financeiro_regras_ocr', id, 'Regra OCR')) this.closeModal(); },
+                'delete-ocr-rule': () => DataHandlers.deleteItem('financeiro_regras_ocr', id, 'Regra OCR'),
+                'cancel-lancar-form': () => { document.getElementById('form-lancamento-container').innerHTML = ''; },
+                'change-chart-type': () => { this.state.dashboardChartType = target.dataset.chart; this.renderCurrentView(); },
+                'toggle-menu': () => { document.querySelectorAll('.card-actions-menu').forEach(m => { if (m.dataset.menuId !== id) m.classList.add('hidden'); }); document.querySelector(`.card-actions-menu[data-menu-id="${id}"]`)?.classList.toggle('hidden'); },
+                'toggle-archived': () => { this.state.showArchived = !this.state.showArchived; this.renderCurrentView(); },
+                'pay-invoice': () => this.navigate({ currentTarget: { dataset: { view: 'lancar' } }, preventDefault: () => {} }, { formType: 'pagarFatura', prefill: { destinationAccountId: target.dataset.cardId, value: parseFloat(target.dataset.invoiceTotal), invoiceMonthYear: target.dataset.invoiceKey } }),
+                'edit-from-details': () => { this.closeModal(); setTimeout(() => UIRenderer.showTransactionModal(id), 310); },
+                'add-account': () => UIRenderer.showAccountModal(),
+                'edit-account': () => UIRenderer.showAccountModal(id),
+                'delete-account': () => DataHandlers.deleteItem('financeiro_contas', id, 'Conta'),
+                'archive-account': () => { const acc = this.state.accounts.find(a => a.id === id); this.db.collection('financeiro_contas').doc(id).update({ arquivado: !acc.arquivado }); },
+                'adjust-balance': () => LogicManager.adjustAccountBalance(id),
+                'delete-transaction': () => DataHandlers.deleteItem('financeiro_lancamentos', id, 'Lançamento', this.state.allTransactions.find(t => t.id === id)).then(success => success && this.closeModal()),
+                'show-filter-modal': () => UIRenderer.showFilterModal(),
+                'show-sort-modal': () => UIRenderer.showSortModal(),
+                'add-planning-item': () => LogicManager.addPlanningItem(target.dataset.type),
+                'delete-planning-item': () => LogicManager.deletePlanningItem(target.dataset.type, target.dataset.index),
+                'sync-invoice': () => LogicManager.syncInvoiceValue(target.dataset.index, target.dataset.cardId),
+                'add-category': () => UIRenderer.showCategoryModal(),
+                'edit-category': () => UIRenderer.showCategoryModal(id),
+                'delete-category': () => DataHandlers.deleteItem('financeiro_categorias', id, 'Categoria'),
+                'add-person': () => UIRenderer.showPersonModal(),
+                'edit-person': () => UIRenderer.showPersonModal(id),
+                'delete-person': () => DataHandlers.deleteItem('financeiro_pessoas', id, 'Pessoa'),
+                'show-add-alias-modal': () => UIRenderer.showAddAliasModal(target.dataset.description),
+                'launch-ocr': () => LogicManager.launchOcr(UIRenderer.renderLancamentoForm),
             };
             if (actions[action]) actions[action]();
         },
 
         async handleFormSubmit(e) {
             e.preventDefault();
-            const form = e.target;
+            const form = e.target.closest('form');
+            if (!form) return;
+        
+            const formId = form.getAttribute('id');
+        
             const handlers = {
                 'account-form': () => DataHandlers.saveItem(e, 'financeiro_contas', 'Conta'),
                 'category-form': () => DataHandlers.saveItem(e, 'financeiro_categorias', 'Categoria'),
                 'person-form': () => DataHandlers.saveItem(e, 'financeiro_pessoas', 'Pessoa'),
                 'establishment-form': () => DataHandlers.saveItem(e, 'financeiro_estabelecimentos', 'Estabelecimento'),
+                'ocr-rule-form': () => DataHandlers.saveItem(e, 'financeiro_regras_ocr', 'Regra OCR'),
                 'add-alias-form': () => DataHandlers.saveAssociation(form),
                 'transaction-form': () => DataHandlers.saveTransaction(form, true),
                 'lancar-form': () => DataHandlers.saveTransaction(form, false),
-                'ocr-rule-form': () => DataHandlers.saveItem(e, 'financeiro_regras_ocr', 'Regra OCR'),
                 'filter-form': () => {
                     this.state.movementsFilter = Object.fromEntries(new FormData(form).entries());
-                    this.closeModal(); this.renderCurrentView(); return { success: false };
+                    this.closeModal(); this.renderCurrentView();
+                    return Promise.resolve({ success: false });
                 },
                 'sort-form': () => {
                     const [key, order] = new FormData(form).get('sort').split('-');
                     this.state.movementsSort = { key, order };
-                    this.closeModal(); this.renderCurrentView(); return { success: false };
+                    this.closeModal(); this.renderCurrentView();
+                    return Promise.resolve({ success: false });
                 }
             };
-            if (handlers[form.id]) {
-                const result = await handlers[form.id]();
+        
+            if (handlers[formId]) {
+                const result = await handlers[formId]();
                 if (result?.success) this.closeModal();
             }
         },
-
+        
         handleStateUpdateOnInput(e) {
-            if (e.target.closest('.planning-input')) {
-                const input = e.target;
+            const input = e.target;
+            if (input.closest('.planning-input')) {
                 const { type, index, field } = input.dataset;
                 const value = input.type === 'number' ? parseFloat(input.value) || 0 : input.value;
-                this.state.planningData[type][index][field] = value;
+                if(this.state.planningData?.[type]?.[index]) {
+                    this.state.planningData[type][index][field] = value;
+                }
                 UIRenderer.updateSummary();
                 LogicManager.debouncedSavePlanning();
+            } else if (input.closest('#lancar-form')) {
+                if (input.name === 'description') {
+                    LogicManager.handleDescriptionChange(input.value, input.closest('form'));
+                }
             }
         },
 
         handleSaveOnChange(e) {
-            if (e.target.closest('.planning-item-checkbox')) {
-                const checkbox = e.target;
+            const target = e.target;
+            const checkbox = target.closest('.planning-item-checkbox');
+            if (checkbox) {
                 const { type, index } = checkbox.dataset;
-                const item = this.state.planningData[type][parseInt(index)];
-                item.paid = checkbox.checked;
-                DataHandlers.savePlanningData(this.state.planningData, this.state.currentMonthYear);
-                checkbox.closest('.planning-item').classList.toggle('paid', checkbox.checked);
-                UIRenderer.updateSummary();
+                const item = this.state.planningData?.[type]?.[parseInt(index)];
+                if(item) {
+                    item.paid = checkbox.checked;
+                    DataHandlers.savePlanningData(this.state.planningData, this.state.currentMonthYear);
+                    checkbox.closest('.planning-item').classList.toggle('paid', checkbox.checked);
+                    UIRenderer.updateSummary();
+                }
             }
-            if (e.target.id === 'lancar-saida-account') {
-                const form = e.target.closest('form');
+            if (target.id === 'lancar-saida-account') {
+                const form = target.closest('form');
                 const installmentsGroup = form.querySelector('#installments-group');
-                const selectedAccount = this.state.accounts.find(a => a.id === e.target.value);
-                installmentsGroup.classList.toggle('hidden', selectedAccount?.type !== 'Cartão de Crédito');
+                const selectedAccount = this.state.accounts.find(a => a.id === target.value);
+                if(installmentsGroup) {
+                    installmentsGroup.classList.toggle('hidden', selectedAccount?.type !== 'Cartão de Crédito');
+                }
+            }
+            if (target.name === 'establishmentId') {
+                 const form = target.closest('form');
+                 LogicManager.handleEstablishmentChange(target.value, form);
             }
         },
 
         setupModalEvents() {
             if (this.closeModalTimeout) clearTimeout(this.closeModalTimeout);
             this.elements.modalContainer.classList.add('visible');
-            this.elements.modalContainer.querySelectorAll('.close-modal-btn').forEach(btn => btn.onclick = () => this.closeModal());
+            this.elements.modalContainer.querySelectorAll('.close-modal-btn, .button-secondary').forEach(btn => {
+                if (!btn.id?.includes('delete')) { 
+                    btn.onclick = () => this.closeModal();
+                }
+            });
             this.elements.modalContainer.onclick = (e) => { if (e.target === this.elements.modalContainer) this.closeModal(); };
         },
 
         closeModal() {
             this.elements.modalContainer.classList.remove('visible');
-            this.closeModalTimeout = setTimeout(() => {
-                this.elements.modalContainer.innerHTML = '';
-            }, 300);
+            this.closeModalTimeout = setTimeout(() => { this.elements.modalContainer.innerHTML = ''; }, 300);
         },
 
         findItemName(id, collectionName) {
             const collection = this.state[collectionName] || [];
-            const item = collection.find(c => c && c.id === id);
-            return item ? item.name : 'N/A';
+            return collection.find(c => c.id === id)?.name || 'N/A';
         },
         
         generateReportAndShowModal() {
@@ -456,25 +438,42 @@ document.addEventListener('DOMContentLoaded', () => {
             const exportBtn = document.getElementById('export-report-pdf-btn');
             if(!exportBtn || !this.state.currentReport) return;
             exportBtn.disabled = true;
+            exportBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Gerando...`;
             try {
                 const { jsPDF } = window.jspdf;
-                const { transactions, title } = this.state.currentReport;
+                const { transactions, title, summary } = this.state.currentReport;
                 const doc = new jsPDF();
+                doc.setFontSize(18);
+                doc.text(title, 14, 22);
                 const tableBody = transactions.map(t => [
                     Utils.getDateObject(t.date).toLocaleDateString('pt-BR'),
                     t.description, 
                     this.findItemName(t.accountId, 'accounts'),
                     Utils.formatCurrency(t.value)
                 ]);
-                doc.autoTable({ head: [['Data', 'Descrição', 'Conta', 'Valor']], body: tableBody });
+                doc.autoTable({ 
+                    head: [['Data', 'Descrição', 'Conta', 'Valor']], 
+                    body: tableBody, startY: 30, theme: 'grid'
+                });
+                let finalY = doc.lastAutoTable.finalY || 40;
+                doc.setFontSize(12);
+                doc.text('Resumo do Período', 14, finalY + 10);
+                doc.autoTable({
+                    body: [
+                        ['Total de Entradas', Utils.formatCurrency(summary.totalIncome)],
+                        ['Total de Saídas', Utils.formatCurrency(summary.totalExpense)],
+                        ['Saldo Final', Utils.formatCurrency(summary.finalBalance)]
+                    ],
+                    startY: finalY + 15, theme: 'plain'
+                });
                 doc.save(`${title.replace(/[^\w]/g, '_')}.pdf`);
             } catch (err) {
-                Utils.showToast('Erro ao gerar PDF.', 'error');
+                console.error("PDF Generation Error:", err);
             } finally {
                 exportBtn.disabled = false;
+                exportBtn.innerHTML = `<i class="fa-solid fa-file-pdf"></i> Gerar PDF`;
             }
         }
     };
-
     App.init();
 });

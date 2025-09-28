@@ -1,15 +1,14 @@
 // ui-renderer.js
 
-import { 
-    formatCurrency, 
-    getContrastColor, 
+import {
+    formatCurrency,
+    getContrastColor,
     capitalizeFirstLetter,
     getDateObject,
     getLocalISODate
 } from './utils.js';
 
-// Variáveis de escopo global injetadas pelo App.js
-let appState; 
+let appState;
 let findItemNameGlobal;
 let calculateInvoiceDetailsGlobal;
 let calculateCreditCardUsageGlobal;
@@ -29,10 +28,6 @@ export function initUIRenderer(state, dependencies) {
     exportReportToPdfGlobal = dependencies.exportReportToPdf;
 }
 
-// ======================================================================
-// 1. RENDERING DAS PRINCIPAIS VIEWS
-// ======================================================================
-
 export function getResumosHtml() {
     const transactionsThisMonth = appState.allTransactions.filter(t => t && t.monthYear === appState.currentMonthYear);
     const totalIncome = transactionsThisMonth.filter(t => t.type === 'Entrada').reduce((sum, t) => sum + t.value, 0);
@@ -40,7 +35,7 @@ export function getResumosHtml() {
     const accountBalance = appState.accounts
         .filter(a => a && a.type === 'Conta Corrente' && !a.arquivado)
         .reduce((sum, a) => sum + (parseFloat(a.balance) || 0), 0);
-        
+
     return `
     <div class="view-header"><h2><i class="fa-solid fa-chart-pie"></i> Resumos</h2></div>
     <div class="grid-container" style="margin-bottom: 24px;">
@@ -195,7 +190,7 @@ export function getSettingsSubmenuHtml(submenu) {
                 <span class="icon-name"><i class="fa-solid ${item.icon || icon}"></i> ${item.name}</span>
                 <div class="actions">
                     <button class="button-icon" data-action="edit-${type}" data-id="${item.id}"><i class="fa-solid fa-pen"></i></button>
-                    <button class="button-icon delete-btn" data-action="delete-${type}" data-id="${item.id}"><i class="fa-solid fa-trash"></i></button>
+                    <button class="button-icon" data-action="delete-${type}" data-id="${item.id}"><i class="fa-solid fa-trash"></i></button>
                 </div>
             </div>`).join('');
     };
@@ -224,7 +219,7 @@ export function getSettingsSubmenuHtml(submenu) {
         },
         'establishments': {
             title: 'Estabelecimentos',
-            content: `<div class="card">${getItemsHtml(appState.establishments, 'establishment', 'fa-store')}</div>`,
+            content: `<div class="card"><div id="establishments-list">${getItemsHtml(appState.establishments, 'establishment', 'fa-store')}</div></div>`,
             actions: `<button class="button-primary" data-action="add-establishment"><i class="fa-solid fa-plus"></i> Adicionar</button>`
         },
         'ocr-rules': {
@@ -254,7 +249,7 @@ export function getSettingsSubmenuHtml(submenu) {
     };
 
     const current = submenus[submenu];
-    if (!current) return getSettingsHtml(); 
+    if (!current) return getSettingsHtml();
 
     return `
     <div class="view-header">
@@ -306,7 +301,7 @@ export function renderOcrRulesList() {
                         </span>
                         <div class="actions">
                             <button class="button-icon" data-action="edit-ocr-rule" data-id="${rule.id}"><i class="fa-solid fa-pen"></i></button>
-                            <button class="button-icon delete-btn" data-action="delete-ocr-rule" data-id="${rule.id}"><i class="fa-solid fa-trash"></i></button>
+                            <button class="button-icon" data-action="delete-ocr-rule" data-id="${rule.id}"><i class="fa-solid fa-trash"></i></button>
                         </div>
                     </div>`;
                 });
@@ -351,31 +346,27 @@ export function getPlanningHtml() {
     </div>`;
 }
 
-// ======================================================================
-// 2. RENDERING DE COMPONENTES/ITENS
-// ======================================================================
-
 export function getTransactionHtml(transaction, showAccount = true) {
     if (!transaction || !transaction.id) return '';
-    
+
     const account = appState.accounts.find(a => a && a.id === transaction.accountId);
     const category = appState.categories.find(c => c && c.id === transaction.categoryId);
-    
+
     const primaryText = transaction.establishmentId ? findItemNameGlobal(transaction.establishmentId, 'establishments') : transaction.description;
     const secondaryText = showAccount && account ? account.name : category?.name || transaction.type;
 
     let isPositive = transaction.type === 'Entrada';
     let amountClass = isPositive ? 'positive' : 'negative';
     let amountSign = isPositive ? '+' : '-';
-    
+
     if (transaction.type === 'Transferência' || transaction.type === 'Pagamento de Fatura') {
         amountClass = 'neutral';
         amountSign = '';
     }
-    
+
     const date = getDateObject(transaction.date);
     const formattedDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
-    
+
     return `<div class="transaction-list-item" data-id="${transaction.id}">
     <div class="icon" style="background-color: ${account?.color || '#e5e5ea'}"><i class="fa-solid ${category?.icon || (isPositive ? 'fa-arrow-up' : 'fa-arrow-down')}"></i></div>
     <div class="details"><div class="description">${primaryText}</div><div class="category">${secondaryText}</div></div>
@@ -387,10 +378,10 @@ export function generateCardHTML(account) {
     if (!account) return '';
     const textColor = getContrastColor(account.color);
     let icon, mainLabel, mainValue, footerInfo = '';
-    
+
     const openInvoice = account.type === 'Cartão de Crédito' ? calculateInvoiceDetailsGlobal(account.id, true).openInvoiceTotal : 0;
     const availableLimit = (account.limit || 0) - calculateCreditCardUsageGlobal(account.id);
-    
+
     if (account.type === 'Conta Corrente') {
         icon = 'fa-building-columns';
         mainLabel = 'Saldo Atual';
@@ -401,7 +392,7 @@ export function generateCardHTML(account) {
         mainValue = formatCurrency(openInvoice);
         footerInfo = `<div class="card-footer"><span class="label">Limite Disponível</span><span class="value">${formatCurrency(availableLimit)}</span></div>`;
     }
-    
+
     return `
     <div class="account-card-display ${account.arquivado ? 'archived' : ''}" style="background-color: ${account.color || '#424242'}; color: ${textColor};">
     <div class="card-content">
@@ -412,7 +403,7 @@ export function generateCardHTML(account) {
         ${account.type === 'Conta Corrente' ? `<li data-action="adjust-balance" data-id="${account.id}"><i class="fa-solid fa-sack-dollar"></i> Ajustar Saldo</li>` : ''}
         <li data-action="edit-account" data-id="${account.id}"><i class="fa-solid fa-pencil"></i> Editar</li>
         <li data-action="archive-account" data-id="${account.id}"><i class="fa-solid fa-archive"></i> ${account.arquivado ? 'Desarquivar' : 'Arquivar'}</li>
-        <li data-action="delete-account" data-id="${account.id}" class="delete"><i class="fa-solid fa-trash-can"></i> Excluir</li>
+        <li data-action="delete-account" data-id="${account.id}"><i class="fa-solid fa-trash-can"></i> Excluir</li>
         </ul>
         </div>
         <div class="card-body">
@@ -426,7 +417,7 @@ export function generateCardHTML(account) {
 
 export function getPlanningRowHtml(type, item, index) {
     if (!item) return '';
-    
+
     if (type === 'receitas') {
         return `
         <div class="planning-item income-item">
@@ -479,58 +470,30 @@ export function getPlanningRowHtml(type, item, index) {
     </div>`;
 }
 
-
-// ======================================================================
-// 3. RENDERING DE SEÇÕES DE PLANEJAMENTO
-// ======================================================================
-
 export function renderSaidasSection() {
     const container = document.getElementById('saidas-section-container');
     if (!container) return;
-    const automaticFaturas = (appState.planningData.despesas || []).filter(d => d && d.isAutomatic);
-    const manualDespesas = (appState.planningData.despesas || []).filter(d => d && !d.isAutomatic);
-    
     const allDespesas = appState.planningData.despesas || [];
+    const automaticFaturas = allDespesas.filter(d => d && d.isAutomatic);
+    const manualDespesas = allDespesas.filter(d => d && !d.isAutomatic);
 
-    const automaticHtml = automaticFaturas.map(item => {
-        const originalIndex = allDespesas.indexOf(item);
-        return getPlanningRowHtml('despesas', item, originalIndex);
-    }).join('');
-
-    const manualHtml = manualDespesas.map(item => {
-        const originalIndex = allDespesas.indexOf(item);
-        return getPlanningRowHtml('despesas', item, originalIndex);
-    }).join('');
-
+    const automaticHtml = automaticFaturas.map(item => getPlanningRowHtml('despesas', item, allDespesas.indexOf(item))).join('');
+    const manualHtml = manualDespesas.map(item => getPlanningRowHtml('despesas', item, allDespesas.indexOf(item))).join('');
     container.innerHTML = `
     <div class="planning-subsection-header">Faturas de Cartão</div>
-    <div class="planning-list" data-list-type="faturas">
-    ${automaticHtml}
-    </div>
+    <div class="planning-list" data-list-type="faturas">${automaticHtml.length ? automaticHtml : '<p style="font-size: 14px; color: var(--text-secondary); padding: 8px 12px;">Nenhuma fatura prevista.</p>'}</div>
     <div class="planning-subsection-header">Outras Despesas</div>
-    <div class="planning-list" data-list-type="outrasDespesas">
-    ${manualHtml}
-    </div>
+    <div class="planning-list" data-list-type="outrasDespesas">${manualHtml.length ? manualHtml : '<p style="font-size: 14px; color: var(--text-secondary); padding: 8px 12px;">Nenhuma outra despesa prevista.</p>'}</div>
     <button class="button-primary" data-action="add-planning-item" data-type="despesas" style="margin-top: 16px;"><i class="fa-solid fa-plus"></i> Adicionar Outra Despesa</button>`;
 }
 
 export function renderList(listType) {
     const listContainer = document.querySelector(`.planning-list[data-list-type="${listType}"]`);
     if (!listContainer) return;
-
-    let items, type;
-    if (listType === 'receitas') {
-        items = (appState.planningData.receitas || []).filter(i => !!i);
-        type = 'receitas';
-    } else {
-        items = (appState.planningData.despesas || []).filter(d => d && !d.isAutomatic);
-        type = 'despesas';
-    }
-
-    listContainer.innerHTML = items.map(item => {
-        const originalIndex = appState.planningData[type].findIndex(pItem => pItem === item);
-        return getPlanningRowHtml(type, item, originalIndex);
-    }).join('');
+    const items = (appState.planningData[listType] || []).filter(i => !!i);
+    listContainer.innerHTML = items.length
+        ? items.map(item => getPlanningRowHtml(listType, item, appState.planningData[listType].indexOf(item))).join('')
+        : '<p style="font-size: 14px; color: var(--text-secondary); padding: 8px 12px;">Nenhuma entrada prevista.</p>';
 }
 
 export function updateSummary() {
@@ -561,19 +524,14 @@ export function renderAllPlanningSections() {
     updateSummary();
 }
 
-
-// ======================================================================
-// 4. RENDERING DE FORMULÁRIOS DE LANÇAMENTO
-// ======================================================================
-
 export function renderLancamentoForm(type, prefillData = {}) {
     const container = document.getElementById('form-lancamento-container');
     if (!container) return;
-    
+
     const accounts = appState.accounts.filter(a => a && !a.arquivado) || [];
     const checkingAccounts = accounts.filter(a => a.type === 'Conta Corrente');
     const creditCards = accounts.filter(a => a.type === 'Cartão de Crédito');
-    
+
     const getOptions = (items = [], selectedId) => {
         return [...items]
             .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
@@ -583,10 +541,7 @@ export function renderLancamentoForm(type, prefillData = {}) {
 
     const dateInputValue = prefillData.date || getLocalISODate();
     let formHtml = '', title = '';
-
     const prefill = (name) => prefillData[name] || '';
-    const isCreditCardSelected = prefill('accountId') && accounts.find(a => a.id === prefill('accountId'))?.type === 'Cartão de Crédito';
-    const installmentsHidden = !(type === 'saida' && isCreditCardSelected);
 
     switch (type) {
         case 'saida':
@@ -596,7 +551,7 @@ export function renderLancamentoForm(type, prefillData = {}) {
             <div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" placeholder="0,00" value="${prefill('value')}" required></div></div>
             <div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div>
             <div class="form-group"><label>Conta / Cartão</label><select id="lancar-saida-account" name="accountId" required><option value="">Selecione...</option>${getOptions(accounts, prefill('accountId'))}</select></div>
-            <div id="installments-group" class="form-group ${installmentsHidden ? 'hidden' : ''}"><label>Número de Parcelas</label><input type="number" inputmode="numeric" name="installments" min="1" value="${prefill('installments') || '1'}"></div>
+            <div id="installments-group" class="form-group hidden"><label>Número de Parcelas</label><input type="number" inputmode="numeric" name="installments" min="1" value="${prefill('installments') || '1'}"></div>
             <div class="form-group"><label>Categoria</label><select name="categoryId" required><option value="">Selecione...</option>${getOptions(appState.categories, prefill('categoryId'))}</select></div>
             <div class="form-group"><label>Pessoa (Opcional)</label><select name="personId"><option value="">Nenhuma</option>${getOptions(appState.people, prefill('personId'))}</select></div>
             <div class="form-group"><label>Estabelecimento (Opcional)</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(appState.establishments, prefill('establishmentId'))}</select><div id="association-helper-container"></div></div>`;
@@ -626,16 +581,100 @@ export function renderLancamentoForm(type, prefillData = {}) {
             <div class="form-group"><label>Valor do Pagamento</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" inputmode="decimal" name="value" value="${prefill('value') || ''}" placeholder="0,00" required></div></div>
             <div class="form-group"><label>Data do Pagamento</label><input type="date" name="date" value="${dateInputValue}" required></div>
             <div class="form-group"><label>Pagar com a conta</label><select name="sourceAccountId" required><option value="">Selecione...</option>${getOptions(checkingAccounts, prefill('sourceAccountId'))}</select></div>
-            <div class="form-group"><label>Fatura do cartão</label><select name="destinationAccountId" required><option value="">Selecione...</option>${getOptions(appState.creditCards, prefill('destinationAccountId'))}</select></div>`;
+            <div class="form-group"><label>Fatura do cartão</label><select name="destinationAccountId" required><option value="">Selecione...</option>${getOptions(creditCards, prefill('destinationAccountId'))}</select></div>`;
             break;
     }
 
     container.innerHTML = `<div class="card"><form id="lancar-form" data-type="${type}" novalidate><h3 class="card-title" style="font-size: 20px;">${title}</h3>${formHtml}<div class="form-actions"><button type="button" class="button-secondary" data-action="cancel-lancar-form">Cancelar</button><button type="submit" class="button-primary"><i class="fa-solid fa-check"></i> Salvar</button></div></form></div>`;
 }
 
-// ======================================================================
-// 5. CRIAÇÃO DE MODAIS
-// ======================================================================
+export function createDashboardChart() {
+    const ctx = document.getElementById('dashboard-chart');
+    if (!ctx) return;
+    if (appState.charts.dashboardChart) appState.charts.dashboardChart.destroy();
+
+    const transactions = appState.allTransactions.filter(t => t.monthYear === appState.currentMonthYear);
+    const expenseData = transactions.filter(t => t.type === 'Saída');
+    let dataByGroup = {};
+    let emptyMessage = "Nenhuma saída no mês";
+
+    switch (appState.dashboardChartType) {
+        case 'establishment':
+            expenseData.forEach(t => { if (t?.establishmentId) { const name = findItemNameGlobal(t.establishmentId, 'establishments'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; } });
+            emptyMessage = "Nenhuma saída por estabelecimento.";
+            break;
+        case 'person':
+            expenseData.forEach(t => { if (t?.personId) { const name = findItemNameGlobal(t.personId, 'people'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; } });
+            emptyMessage = "Nenhuma saída por pessoa.";
+            break;
+        default:
+            expenseData.forEach(t => { const name = findItemNameGlobal(t.categoryId, 'categories'); dataByGroup[name] = (dataByGroup[name] || 0) + t.value; });
+    }
+
+    const canvasContainer = ctx.parentElement;
+    if (Object.keys(dataByGroup).length === 0) {
+        if(canvasContainer) {
+            canvasContainer.innerHTML = `<div class="empty-state"><i class="fa-solid fa-chart-pie"></i><p>${emptyMessage}</p></div>`;
+        }
+        return;
+    }
+    if (canvasContainer && canvasContainer.tagName !== 'CANVAS') {
+        canvasContainer.innerHTML = '<canvas id="dashboard-chart"></canvas>';
+    }
+
+    appState.charts.dashboardChart = new Chart(document.getElementById('dashboard-chart'), {
+        type: 'doughnut',
+        data: {
+            labels: Object.keys(dataByGroup),
+            datasets: [{
+                data: Object.values(dataByGroup),
+                backgroundColor: ['#007aff', '#34c759', '#ff9500', '#ff3b30', '#af52de', '#5856d6', '#ffcc00'],
+                hoverOffset: 4
+            }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, cutout: '60%' }
+    });
+}
+
+export function showReportModal({transactions, title, summary}) {
+    let transactionsHtml = '<div class="empty-state" style="padding: 20px 0;"><p>Nenhuma transação encontrada.</p></div>';
+
+    if (transactions.length > 0) {
+        transactions.sort((a,b) => getDateObject(b.date) - getDateObject(a.date));
+        transactionsHtml = transactions.map(t => getTransactionHtml(t, true)).join('');
+    }
+
+    const summaryHtml = `
+    <div class="card-details" style="background: var(--bg-tertiary); padding: 16px; margin-top: 24px; border-radius: var(--radius-m);">
+        <h4 class="card-title" style="margin-bottom: 8px; font-size: 16px;">Resumo do Período</h4>
+        <div class="detail-row"><span class="label">Total de Entradas:</span><span class="value positive">${formatCurrency(summary.totalIncome)}</span></div>
+        <div class="detail-row" style="border-bottom: none;"><span class="label">Total de Saídas:</span><span class="value negative">${formatCurrency(summary.totalExpense)}</span></div>
+        <div class="detail-row" style="border-top: 1px solid var(--separator-color); padding-top: 10px; margin-top: 5px; font-weight: bold; font-size: 16px;">
+            <span class="label">Saldo Final:</span>
+            <span class="value ${summary.finalBalance >= 0 ? 'positive' : 'negative'}">${formatCurrency(summary.finalBalance)}</span>
+        </div>
+    </div>`;
+
+    const modalHtml = `
+    <div class="modal-content" style="max-width: 800px;">
+        <div class="modal-header"><h2>${title}</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
+        <div class="modal-body" id="report-modal-content">
+            <p style="color: var(--text-secondary); margin-bottom: 16px; text-align: center; font-weight: 500;">Exibindo ${summary.count} transações.</p>
+            <div class="transaction-list">${transactionsHtml}</div>
+            ${summaryHtml}
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="button-secondary close-modal-btn">Fechar</button>
+            <button type="button" id="export-report-pdf-btn" class="button-primary"><i class="fa-solid fa-file-pdf"></i> Gerar PDF</button>
+        </div>
+    </div>`;
+    document.getElementById('modal-container').innerHTML = modalHtml;
+    setupModalEventsGlobal();
+    const exportBtn = document.getElementById('export-report-pdf-btn');
+    if (exportBtn) {
+        exportBtn.onclick = () => exportReportToPdfGlobal();
+    }
+}
 
 function getGenericModalHtml(formId, title, item = {}, fields = []) {
     const fieldsHtml = fields.map(f => `
@@ -643,7 +682,7 @@ function getGenericModalHtml(formId, title, item = {}, fields = []) {
             <label>${f.label}</label>
             <input type="${f.type}" name="${f.name}" value="${item[f.name] || ''}" ${f.required ? 'required' : ''}>
         </div>`).join('');
-    
+
     return `
     <div class="modal-content">
         <form id="${formId}">
@@ -666,7 +705,7 @@ export function showAccountModal(accountId = null) {
     const account = isEditing ? appState.accounts.find(a => a.id === accountId) : {};
     const modalContainer = document.getElementById('modal-container');
     const accountColor = account?.color || '#007aff';
-    
+
     modalContainer.innerHTML = `
     <div class="modal-content">
     <form id="account-form">
@@ -709,31 +748,19 @@ export function showAccountModal(accountId = null) {
     </div>
     </form>
     </div>`;
-    
+
     const selector = document.getElementById('account-type');
     const balanceLimitGroup = document.getElementById('balance-limit-group');
 
     const toggleFields = () => {
         const isCredit = selector.value === 'Cartão de Crédito';
         document.getElementById('credit-card-fields').classList.toggle('hidden', !isCredit);
-        
         if (isCredit) {
-            balanceLimitGroup.innerHTML = `
-                <label>Limite do Cartão</label>
-                <div class="input-group-currency">
-                    <span class="currency-symbol">R$</span>
-                    <input type="number" step="0.01" name="limit" value="${account?.limit || ''}" placeholder="0,00">
-                </div>`;
+            balanceLimitGroup.innerHTML = `<label>Limite do Cartão</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" step="0.01" name="limit" value="${account?.limit || ''}" placeholder="0,00"></div>`;
         } else {
-            balanceLimitGroup.innerHTML = `
-                <label>Saldo Inicial</label>
-                <div class="input-group-currency">
-                    <span class="currency-symbol">R$</span>
-                    <input type="number" step="0.01" name="balance" value="${account?.balance || ''}" placeholder="0,00" ${isEditing ? 'disabled' : ''}>
-                </div>`;
+            balanceLimitGroup.innerHTML = `<label>Saldo Inicial</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" step="0.01" name="balance" value="${account?.balance || ''}" placeholder="0,00" ${isEditing ? 'disabled' : ''}></div>`;
         }
     };
-
     toggleFields();
     selector.onchange = toggleFields;
     setupModalEventsGlobal();
@@ -741,8 +768,10 @@ export function showAccountModal(accountId = null) {
 
 export function showCategoryModal(categoryId = null) {
     const category = categoryId ? appState.categories.find(c => c.id === categoryId) : {};
-    const modalContainer = document.getElementById('modal-container');
-    modalContainer.innerHTML = `<div class="modal-content"><form id="category-form"><input type="hidden" name="id" value="${category?.id || ''}"><div class="modal-header"><h2>${category?.id ? 'Editar' : 'Nova'} Categoria</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Nome</label><input type="text" name="name" value="${category?.name || ''}" required></div><div class="form-group"><label>Ícone (Font Awesome)</label><input type="text" name="icon" value="${category?.icon || 'fa-tag'}" placeholder="Ex: fa-utensils"></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" form="category-form" class="button-primary">Salvar</button></div></form></div>`;
+    document.getElementById('modal-container').innerHTML = getGenericModalHtml('category-form', 'Categoria', category, [
+        { label: 'Nome', name: 'name', type: 'text', required: true },
+        { label: 'Ícone (Font Awesome)', name: 'icon', type: 'text', required: false }
+    ]);
     setupModalEventsGlobal();
 }
 
@@ -753,17 +782,19 @@ export function showPersonModal(personId = null) {
 }
 
 export function showEstablishmentModal(establishmentId = null) {
-    const establishment = establishmentId ? appState.establishments.find(e => e.id === establishmentId) : {};
+    const isEditing = !!establishmentId;
+    const establishment = isEditing ? appState.establishments.find(e => e.id === establishmentId) : {};
     const categoryOptions = appState.categories
         .sort((a,b) => a.name.localeCompare(b.name))
         .map(cat => `<option value="${cat.id}" ${establishment?.categoriaPadraoId === cat.id ? 'selected' : ''}>${cat.name}</option>`)
         .join('');
+    
     const aliases = establishment?.aliases ? establishment.aliases.join(', ') : '';
 
     const fieldsHtml = `
         <div class="form-group">
             <label>Nome</label>
-            <input type="text" name="name" value="${establishment.name || ''}" required>
+            <input type="text" name="name" value="${establishment?.name || ''}" required>
         </div>
         <div class="form-group">
             <label>Categoria Padrão (Opcional)</label>
@@ -773,24 +804,23 @@ export function showEstablishmentModal(establishmentId = null) {
             </select>
         </div>
         <div class="form-group">
-            <label>Apelidos/Nomes Alternativos (CNPJ)</label>
-            <input type="text" name="aliases" value="${aliases}" placeholder="Ex: panificadora silva, cnpj 12.345...">
-            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Nomes alternativos (separados por vírgula) que aparecem em comprovantes.</p>
-        </div>
-    `;
+            <label>Apelidos/Nomes Alternativos</label>
+            <input type="text" name="aliases" value="${aliases}" placeholder="Ex: panificadora silva, padaria do ze">
+            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Nomes alternativos (separados por vírgula).</p>
+        </div>`;
 
     document.getElementById('modal-container').innerHTML = `
         <div class="modal-content">
             <form id="establishment-form">
-                <input type="hidden" name="id" value="${establishment.id || ''}">
+                <input type="hidden" name="id" value="${establishment?.id || ''}">
                 <div class="modal-header">
-                    <h2>${establishment.id ? 'Editar' : 'Novo'} Estabelecimento</h2>
+                    <h2>${isEditing ? 'Editar' : 'Novo'} Estabelecimento</h2>
                     <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
                 </div>
                 <div class="modal-body">${fieldsHtml}</div>
                 <div class="modal-actions">
                     <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
-                    <button type="submit" form="establishment-form" class="button-primary">Salvar</button>
+                    <button type="submit" class="button-primary">Salvar</button>
                 </div>
             </form>
         </div>`;
@@ -806,22 +836,16 @@ export function showOcrRuleModal(ruleId = null) {
     <div class="modal-content">
         <form id="ocr-rule-form">
             <input type="hidden" name="id" value="${rule?.id || ''}">
-            <div class="modal-header">
-                <h2>${isEditing ? 'Editar' : 'Nova'} Regra de OCR</h2>
-                <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
-            </div>
+            <div class="modal-header"><h2>${isEditing ? 'Editar' : 'Nova'} Regra de OCR</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label>Nome da Regra</label>
-                    <input type="text" name="name" value="${rule?.name || ''}" placeholder="Ex: Data do PicPay" required>
-                </div>
+                <div class="form-group"><label>Nome da Regra</label><input type="text" name="name" value="${rule?.name || ''}" required></div>
                 <div class="form-group">
                     <label>Tipo de Dado</label>
                     <select name="type" id="ocr-rule-type" required>
                         <option value="">Selecione...</option>
                         <option value="value" ${rule?.type === 'value' ? 'selected' : ''}>Valor</option>
                         <option value="date" ${rule?.type === 'date' ? 'selected' : ''}>Data</option>
-                        <option value="description" ${rule?.type === 'description' ? 'selected' : ''}>Descrição/Estabelecimento</option>
+                        <option value="description" ${rule?.type === 'description' ? 'selected' : ''}>Descrição</option>
                         <option value="installments" ${rule?.type === 'installments' ? 'selected' : ''}>Parcelas</option>
                         <option value="account" ${rule?.type === 'account' ? 'selected' : ''}>Conta/Cartão</option>
                     </select>
@@ -833,66 +857,48 @@ export function showOcrRuleModal(ruleId = null) {
                         ${appState.accounts.map(acc => `<option value="${acc.id}" ${rule?.accountId === acc.id ? 'selected' : ''}>${acc.name}</option>`).join('')}
                     </select>
                 </div>
-                <div class="form-group">
-                    <label>Modo de Criação do Padrão</label>
-                    <div class="mode-toggle-container">
-                        <button type="button" class="mode-btn active" data-mode="simple">Simples</button>
-                        <button type="button" class="mode-btn" data-mode="advanced">Avançado</button>
-                    </div>
-                    <div class="ocr-rule-wizard" id="ocr-wizard-simple"></div>
-                    <div class="ocr-rule-advanced hidden" id="ocr-wizard-advanced">
-                        <textarea name="pattern" rows="3" placeholder="Ex: R\\$\\s*([\\d.,]+)">${rule?.pattern || ''}</textarea>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Prioridade</label>
-                    <input type="number" name="priority" value="${rule?.priority || '10'}" required>
-                </div>
-                <div class="form-group" style="display: flex; align-items: center; gap: 10px;">
-                     <input type="checkbox" name="enabled" id="rule-enabled-checkbox" ${rule?.enabled ? 'checked' : ''} style="width: auto; height: auto; margin: 0; appearance: checkbox;">
-                    <label for="rule-enabled-checkbox" style="margin-bottom: 0; font-weight: normal;">Regra Ativa</label>
-                </div>
+                <div class="form-group"><label>Padrão (Regex)</label><textarea name="pattern" rows="3" placeholder="Ex: R\\$\\s*([\\d.,]+)">${rule?.pattern || ''}</textarea></div>
+                <div class="form-group"><label>Prioridade</label><input type="number" name="priority" value="${rule?.priority || '10'}" required></div>
+                <div class="form-group" style="display: flex; align-items: center; gap: 10px;"><input type="checkbox" name="enabled" id="rule-enabled-checkbox" ${rule?.enabled ? 'checked' : ''} style="width: auto; height: auto; margin: 0; appearance: checkbox;"><label for="rule-enabled-checkbox" style="margin-bottom: 0; font-weight: normal;">Regra Ativa</label></div>
             </div>
-            <div class="modal-actions">
-                <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
-                <button type="submit" class="button-primary">Salvar</button>
-            </div>
+            <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div>
         </form>
     </div>`;
     
-    setupModalEventsGlobal();
+    const typeSelector = modalContainer.querySelector('#ocr-rule-type');
+    const accountSelector = modalContainer.querySelector('#ocr-rule-account-selector');
     
-    // O resto do código para manipular o wizard do modal de regras
+    const toggleAccountField = () => {
+        if(accountSelector && typeSelector) {
+            accountSelector.classList.toggle('hidden', typeSelector.value !== 'account');
+        }
+    };
+
+    if(typeSelector) {
+        typeSelector.addEventListener('change', toggleAccountField);
+        toggleAccountField(); 
+    }
+    setupModalEventsGlobal();
 }
 
 export function showAddAliasModal(description) {
-    const modalContainer = document.getElementById('modal-container');
-    const options = appState.establishments
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .map(i => `<option value="${i.id}">${i.name}</option>`).join('');
-    modalContainer.innerHTML = `
+    const options = appState.establishments.sort((a, b) => a.name.localeCompare(b.name)).map(i => `<option value="${i.id}">${i.name}</option>`).join('');
+    document.getElementById('modal-container').innerHTML = `
     <div class="modal-content">
         <form id="add-alias-form">
             <input type="hidden" name="textoOcr" value="${description}">
-            <div class="modal-header">
-                <h2>Adicionar Apelido</h2>
-                <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
-            </div>
+            <div class="modal-header"><h2>Adicionar Apelido</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
             <div class="modal-body">
                 <p>Associar o texto <strong>"${description}"</strong> a qual estabelecimento?</p>
-                <div class="form-group"><label>Estabelecimento</label><select name="entidadeId" required>${options}</select></div>
+                <div class="form-group"><label>Estabelecimento</label><select name="entidadeId" required><option value="">Selecione...</option>${options}</select></div>
             </div>
-            <div class="modal-actions">
-                <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
-                <button type="submit" class="button-primary">Salvar Apelido</button>
-            </div>
+            <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar Apelido</button></div>
         </form>
     </div>`;
     setupModalEventsGlobal();
 }
 
 export function showTransactionDetailsModal(transaction) {
-    const modalContainer = document.getElementById('modal-container');
     const date = getDateObject(transaction.date);
     const formattedDate = date.toLocaleString('pt-BR', { dateStyle: 'long', timeStyle: 'short' });
     const isDebit = transaction.type === 'Saída';
@@ -903,21 +909,15 @@ export function showTransactionDetailsModal(transaction) {
     const personName = transaction.personId ? findItemNameGlobal(transaction.personId, 'people') : null;
     const establishmentName = transaction.establishmentId ? findItemNameGlobal(transaction.establishmentId, 'establishments') : null;
     const canBeModified = transaction.type !== 'Pagamento de Fatura' && transaction.type !== 'Transferência';
-
     let actionButtons = '';
     if (canBeModified) {
-        actionButtons += `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button>`;
-        actionButtons += `<button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>`;
+        actionButtons = `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button><button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>`;
     }
-
-    modalContainer.innerHTML = `
+    document.getElementById('modal-container').innerHTML = `
     <div class="modal-content">
         <div class="modal-header"><h2>Detalhes da Movimentação</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
         <div class="modal-body">
-            <div class="transaction-detail-header">
-                <span class="transaction-detail-value ${amountClass}">${amountSign} ${formatCurrency(transaction.value)}</span>
-                <span class="transaction-detail-description">${transaction.description}</span>
-            </div>
+            <div class="transaction-detail-header"><span class="transaction-detail-value ${amountClass}">${amountSign} ${formatCurrency(transaction.value)}</span><span class="transaction-detail-description">${transaction.description}</span></div>
             <div class="card-details" style="background: transparent; padding: 0; margin-top: 16px;">
                 <div class="detail-row"><span class="label">Data</span><span class="value">${formattedDate}</span></div>
                 <div class="detail-row"><span class="label">Conta</span><span class="value">${accountName}</span></div>
@@ -926,60 +926,31 @@ export function showTransactionDetailsModal(transaction) {
                 ${establishmentName ? `<div class="detail-row"><span class="label">Estabelecimento</span><span class="value">${establishmentName}</span></div>` : ''}
             </div>
         </div>
-        <div class="modal-actions">
-            <button type="button" class="button-secondary close-modal-btn">Fechar</button>
-            ${actionButtons}
-        </div>
+        <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Fechar</button>${actionButtons}</div>
     </div>`;
     setupModalEventsGlobal();
 }
 
 export function showTransactionModal(transactionId) {
     const transaction = appState.allTransactions.find(t => t.id === transactionId);
-    if (!transaction || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência' || transaction.installmentGroupId) {
-        showToast("Este tipo de lançamento não pode ser editado.", "error");
-        return;
-    }
+    if (!transaction || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência' || transaction.installmentGroupId) return;
     const getOptions = (items, selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
     const dateInputValue = getLocalISODate(getDateObject(transaction.date));
-    let formFieldsHtml = `
-        <div class="form-group"><label>Descrição</label><input type="text" name="description" value="${transaction.description || ''}" required></div>
-        <div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" name="value" value="${transaction.value || ''}" required></div></div>
-        <div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div>
-        <div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(appState.accounts.filter(a => !a.arquivado), transaction.accountId)}</select></div>
-        <div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(appState.categories, transaction.categoryId)}</select></div>
-    `;
+    let formFields = `<div class="form-group"><label>Descrição</label><input type="text" name="description" value="${transaction.description || ''}" required></div><div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" name="value" value="${transaction.value || ''}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(appState.accounts.filter(a => !a.arquivado), transaction.accountId)}</select></div><div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(appState.categories, transaction.categoryId)}</select></div>`;
     if (transaction.type === 'Saída') {
-        formFieldsHtml += `<div class="form-group"><label>Pessoa</label><select name="personId"><option value="">Nenhuma</option>${getOptions(appState.people, transaction.personId)}</select></div>`;
-        formFieldsHtml += `<div class="form-group"><label>Estabelecimento</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(appState.establishments, transaction.establishmentId)}</select></div>`;
+        formFields += `<div class="form-group"><label>Pessoa</label><select name="personId"><option value="">Nenhuma</option>${getOptions(appState.people, transaction.personId)}</select></div>`;
+        formFields += `<div class="form-group"><label>Estabelecimento</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(appState.establishments, transaction.establishmentId)}</select></div>`;
     }
     document.getElementById('modal-container').innerHTML = `
-        <div class="modal-content">
-            <form id="transaction-form">
-                <input type="hidden" name="id" value="${transaction.id}">
-                <div class="modal-header"><h2>Editar Lançamento</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
-                <div class="modal-body">${formFieldsHtml}</div>
-                <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div>
-            </form>
-        </div>`;
+        <div class="modal-content"><form id="transaction-form"><input type="hidden" name="id" value="${transaction.id}"><div class="modal-header"><h2>Editar Lançamento</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${formFields}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div></form></div>`;
     setupModalEventsGlobal();
 }
 
 export function showFilterModal() {
     const { type, accountId } = appState.movementsFilter;
-    const accountOptions = `<option value="all" ${accountId === 'all' ? 'selected' : ''}>Todas</option>` +
-        appState.accounts.map(acc => `<option value="${acc.id}" ${accountId === acc.id ? 'selected' : ''}>${acc.name}</option>`).join('');
+    const accountOptions = `<option value="all" ${accountId === 'all' ? 'selected' : ''}>Todas</option>` + appState.accounts.map(acc => `<option value="${acc.id}" ${accountId === acc.id ? 'selected' : ''}>${acc.name}</option>`).join('');
     document.getElementById('modal-container').innerHTML = `
-    <div class="modal-content">
-        <form id="filter-form">
-            <div class="modal-header"><h2>Filtrar Movimentações</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
-            <div class="modal-body">
-                <div class="form-group"><label>Tipo</label><select name="type"><option value="all" ${type === 'all' ? 'selected' : ''}>Todos</option><option value="Entrada" ${type === 'Entrada' ? 'selected' : ''}>Entradas</option><option value="Saída" ${type === 'Saída' ? 'selected' : ''}>Saídas</option></select></div>
-                <div class="form-group"><label>Conta</label><select name="accountId">${accountOptions}</select></div>
-            </div>
-            <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Aplicar</button></div>
-        </form>
-    </div>`;
+    <div class="modal-content"><form id="filter-form"><div class="modal-header"><h2>Filtrar</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Tipo</label><select name="type"><option value="all" ${type === 'all' ? 'selected' : ''}>Todos</option><option value="Entrada" ${type === 'Entrada' ? 'selected' : ''}>Entradas</option><option value="Saída" ${type === 'Saída' ? 'selected' : ''}>Saídas</option></select></div><div class="form-group"><label>Conta</label><select name="accountId">${accountOptions}</select></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Aplicar</button></div></form></div>`;
     setupModalEventsGlobal();
 }
 
@@ -987,19 +958,6 @@ export function showSortModal() {
     const { key, order } = appState.movementsSort;
     const currentSort = `${key}-${order}`;
     document.getElementById('modal-container').innerHTML = `
-    <div class="modal-content">
-        <form id="sort-form">
-            <div class="modal-header"><h2>Ordenar Movimentações</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
-            <div class="modal-body">
-                <div class="form-group radio-group">
-                    <label><input type="radio" name="sort" value="date-desc" ${currentSort === 'date-desc' ? 'checked' : ''}> Mais Recentes</label>
-                    <label><input type="radio" name="sort" value="date-asc" ${currentSort === 'date-asc' ? 'checked' : ''}> Mais Antigos</label>
-                    <label><input type="radio" name="sort" value="value-desc" ${currentSort === 'value-desc' ? 'checked' : ''}> Maior Valor</label>
-                    <label><input type="radio" name="sort" value="value-asc" ${currentSort === 'value-asc' ? 'checked' : ''}> Menor Valor</label>
-                </div>
-            </div>
-            <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Ordenar</button></div>
-        </form>
-    </div>`;
+    <div class="modal-content"><form id="sort-form"><div class="modal-header"><h2>Ordenar</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group radio-group"><label><input type="radio" name="sort" value="date-desc" ${currentSort === 'date-desc' ? 'checked' : ''}> Mais Recentes</label><label><input type="radio" name="sort" value="date-asc" ${currentSort === 'date-asc' ? 'checked' : ''}> Mais Antigos</label><label><input type="radio" name="sort" value="value-desc" ${currentSort === 'value-desc' ? 'checked' : ''}> Maior Valor</label><label><input type="radio" name="sort" value="value-asc" ${currentSort === 'value-asc' ? 'checked' : ''}> Menor Valor</label></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Ordenar</button></div></form></div>`;
     setupModalEventsGlobal();
 }
