@@ -538,4 +538,5 @@ export function setupAppearanceSettings() {
         updateAnimationSpeed(e.target.value);
         localStorage.setItem('appAnimationStyle', e.target.value);
     };
+
 }
