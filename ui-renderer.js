@@ -283,7 +283,8 @@ export function renderOcrRulesList() {
         date: 'Data',
         description: 'Descrição/Estabelecimento',
         installments: 'Parcelas',
-        account: 'Conta/Cartão'
+        accountId: 'Associação de Conta',
+        establishmentId: 'Associação de Estabelecimento'
     };
 
     let html = '';
@@ -832,52 +833,162 @@ export function showOcrRuleModal(ruleId = null) {
     const rule = isEditing ? appState.ocrRules.find(r => r.id === ruleId) : { enabled: true, priority: 10 };
     const modalContainer = document.getElementById('modal-container');
 
-    modalContainer.innerHTML = `
+    const modalHtml = `
     <div class="modal-content">
         <form id="ocr-rule-form">
             <input type="hidden" name="id" value="${rule?.id || ''}">
-            <div class="modal-header"><h2>${isEditing ? 'Editar' : 'Nova'} Regra de OCR</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
+            <div class="modal-header">
+                <h2>${isEditing ? 'Editar' : 'Nova'} Regra de OCR</h2>
+                <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            </div>
             <div class="modal-body">
-                <div class="form-group"><label>Nome da Regra</label><input type="text" name="name" value="${rule?.name || ''}" required></div>
                 <div class="form-group">
-                    <label>Tipo de Dado</label>
+                    <label for="ocr-rule-name">Nome da Regra</label>
+                    <input type="text" id="ocr-rule-name" name="name" value="${rule?.name || ''}" placeholder="Ex: Valor Total da Nota" required>
+                </div>
+                <div class="form-group">
+                    <label for="ocr-rule-type">Tipo de Informação</label>
                     <select name="type" id="ocr-rule-type" required>
                         <option value="">Selecione...</option>
-                        <option value="value" ${rule?.type === 'value' ? 'selected' : ''}>Valor</option>
-                        <option value="date" ${rule?.type === 'date' ? 'selected' : ''}>Data</option>
-                        <option value="description" ${rule?.type === 'description' ? 'selected' : ''}>Descrição</option>
-                        <option value="installments" ${rule?.type === 'installments' ? 'selected' : ''}>Parcelas</option>
-                        <option value="account" ${rule?.type === 'account' ? 'selected' : ''}>Conta/Cartão</option>
+                        <option value="value" ${rule?.type === 'value' ? 'selected' : ''}>Extrair Valor (Ex: 15,90)</option>
+                        <option value="date" ${rule?.type === 'date' ? 'selected' : ''}>Extrair Data (Ex: 25/12/2025)</option>
+                        <option value="description" ${rule?.type === 'description' ? 'selected' : ''}>Extrair Descrição (Ex: UBER TRIP)</option>
+                        <option value="installments" ${rule?.type === 'installments' ? 'selected' : ''}>Extrair Parcelas (Ex: 3)</option>
+                        <option value="establishmentId" ${rule?.type === 'establishmentId' ? 'selected' : ''}>Associar Estabelecimento</option>
+                        <option value="accountId" ${rule?.type === 'accountId' ? 'selected' : ''}>Associar Conta/Cartão</option>
                     </select>
                 </div>
-                <div class="form-group hidden" id="ocr-rule-account-selector">
-                    <label>Associar Regra à Conta</label>
-                    <select name="accountId">
-                        <option value="">Selecione a conta...</option>
-                        ${appState.accounts.map(acc => `<option value="${acc.id}" ${rule?.accountId === acc.id ? 'selected' : ''}>${acc.name}</option>`).join('')}
-                    </select>
+                
+                <div id="ocr-association-container" class="form-group hidden"></div>
+
+                <div class="ocr-rule-wizard">
+                    <p class="wizard-title"><strong><i class="fa-solid fa-wand-magic-sparkles"></i> Assistente de Criação de Padrão</strong></p>
+                    <div class="form-group">
+                        <label for="ocr-wizard-sample">1. Cole um trecho do texto do comprovante</label>
+                        <textarea id="ocr-wizard-sample" rows="2" placeholder="Ex: VALOR TOTAL R$ 19,90"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="ocr-wizard-target">2. Digite o valor exato que você quer extrair</label>
+                        <input type="text" id="ocr-wizard-target" placeholder="Ex: 19,90">
+                    </div>
+                    <button type="button" class="button-secondary" id="ocr-wizard-generate-btn"><i class="fa-solid fa-gears"></i> Gerar Padrão</button>
                 </div>
-                <div class="form-group"><label>Padrão (Regex)</label><textarea name="pattern" rows="3" placeholder="Ex: R\\$\\s*([\\d.,]+)">${rule?.pattern || ''}</textarea></div>
-                <div class="form-group"><label>Prioridade</label><input type="number" name="priority" value="${rule?.priority || '10'}" required></div>
-                <div class="form-group" style="display: flex; align-items: center; gap: 10px;"><input type="checkbox" name="enabled" id="rule-enabled-checkbox" ${rule?.enabled ? 'checked' : ''} style="width: auto; height: auto; margin: 0; appearance: checkbox;"><label for="rule-enabled-checkbox" style="margin-bottom: 0; font-weight: normal;">Regra Ativa</label></div>
+
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label for="ocr-rule-pattern">Padrão (Regex)</label>
+                    <textarea name="pattern" id="ocr-rule-pattern" rows="3" placeholder="O padrão gerado aparecerá aqui... ou digite manualmente." required>${rule?.pattern || ''}</textarea>
+                </div>
+                <div class="grid-container" style="grid-template-columns: 1fr 1fr; gap: 1rem;">
+                    <div class="form-group">
+                        <label for="ocr-rule-priority">Prioridade</label>
+                        <input type="number" id="ocr-rule-priority" name="priority" value="${rule?.priority || '10'}" required>
+                    </div>
+                    <div class="form-group" style="display: flex; align-items: center; justify-content: flex-start; gap: 10px; margin-top: 2rem;">
+                        <input type="checkbox" name="enabled" id="rule-enabled-checkbox" ${rule?.enabled ?? true ? 'checked' : ''} style="width: auto; height: auto; margin: 0; appearance: checkbox;">
+                        <label for="rule-enabled-checkbox" style="margin-bottom: 0; font-weight: normal;">Regra Ativa</label>
+                    </div>
+                </div>
+
+                <div class="ocr-rule-tester">
+                    <p class="tester-title"><strong><i class="fa-solid fa-vial"></i> Área de Teste</strong></p>
+                    <div class="form-group">
+                        <label for="ocr-tester-input">Cole o texto completo do comprovante aqui</label>
+                        <textarea id="ocr-tester-input" rows="5" placeholder="Cole o texto aqui para testar a regra acima..."></textarea>
+                    </div>
+                    <button type="button" class="button-secondary" data-action="test-ocr-rule"><i class="fa-solid fa-play"></i> Testar Regra</button>
+                    <div id="ocr-tester-result" class="tester-result"></div>
+                </div>
             </div>
-            <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div>
+            <div class="modal-actions">
+                <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
+                <button type="submit" class="button-primary">Salvar Regra</button>
+            </div>
         </form>
     </div>`;
     
-    const typeSelector = modalContainer.querySelector('#ocr-rule-type');
-    const accountSelector = modalContainer.querySelector('#ocr-rule-account-selector');
+    modalContainer.innerHTML = modalHtml;
     
-    const toggleAccountField = () => {
-        if(accountSelector && typeSelector) {
-            accountSelector.classList.toggle('hidden', typeSelector.value !== 'account');
+    const typeSelector = modalContainer.querySelector('#ocr-rule-type');
+    const associationContainer = modalContainer.querySelector('#ocr-association-container');
+    
+    const getOptions = (items, selectedId) => items
+        .sort((a,b) => a.name.localeCompare(b.name))
+        .map(item => `<option value="${item.id}" ${item.id === selectedId ? 'selected' : ''}>${item.name}</option>`)
+        .join('');
+
+    const toggleAssociationFields = () => {
+        const type = typeSelector.value;
+        if (type === 'establishmentId') {
+            associationContainer.innerHTML = `
+                <label>Selecione o Estabelecimento para Associar</label>
+                <select name="associatedId" required>
+                    <option value="">Selecione...</option>
+                    ${getOptions(appState.establishments, rule.associatedId)}
+                </select>`;
+            associationContainer.classList.remove('hidden');
+        } else if (type === 'accountId') {
+            associationContainer.innerHTML = `
+                <label>Selecione a Conta/Cartão para Associar</label>
+                <select name="associatedId" required>
+                    <option value="">Selecione...</option>
+                    ${getOptions(appState.accounts, rule.associatedId)}
+                </select>`;
+            associationContainer.classList.remove('hidden');
+        } else {
+            associationContainer.innerHTML = '';
+            associationContainer.classList.add('hidden');
         }
     };
 
-    if(typeSelector) {
-        typeSelector.addEventListener('change', toggleAccountField);
-        toggleAccountField(); 
+    typeSelector.addEventListener('change', toggleAssociationFields);
+    toggleAssociationFields(); // Executa na abertura para o caso de edição
+
+    const generateBtn = modalContainer.querySelector('#ocr-wizard-generate-btn');
+    if (generateBtn) {
+        generateBtn.onclick = () => {
+            const sampleText = modalContainer.querySelector('#ocr-wizard-sample').value;
+            const targetValue = modalContainer.querySelector('#ocr-wizard-target').value;
+            const ruleType = modalContainer.querySelector('#ocr-rule-type').value;
+            const patternInput = modalContainer.querySelector('#ocr-rule-pattern');
+
+            if (!sampleText || !targetValue) {
+                alert('Por favor, preencha os campos 1 e 2 do assistente.');
+                return;
+            }
+            if (!sampleText.includes(targetValue)) {
+                alert('O "valor a extrair" não foi encontrado no "texto de exemplo". Verifique os valores digitados.');
+                return;
+            }
+
+            const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+            let replacement = '(.*)';
+            switch (ruleType) {
+                case 'value':
+                    replacement = '([\\d.,]+)';
+                    break;
+                case 'installments':
+                    replacement = '(\\d+)';
+                    break;
+                case 'description':
+                case 'establishmentId':
+                case 'accountId':
+                    replacement = `(${escapeRegex(targetValue)})`; // Captura o valor exato
+                    break;
+                case 'date':
+                    replacement = '(\\d{2}).*?(\\w{3}).*?(\\d{4})';
+                    alert(`Para datas, o assistente gera um padrão genérico para Dia, Mês (texto) e Ano. Ex: ${replacement}. Ajuste se necessário.`);
+                    break;
+                default:
+                     alert('Selecione um "Tipo de Informação" para gerar o padrão mais adequado.');
+                     return;
+            }
+            
+            const finalPattern = escapeRegex(sampleText).replace(escapeRegex(targetValue), replacement);
+            patternInput.value = finalPattern;
+        };
     }
+
     setupModalEventsGlobal();
 }
 

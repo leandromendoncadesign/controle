@@ -301,6 +301,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 'add-ocr-rule': () => UIRenderer.showOcrRuleModal(),
                 'edit-ocr-rule': () => UIRenderer.showOcrRuleModal(id),
                 'delete-ocr-rule': () => DataHandlers.deleteItem('financeiro_regras_ocr', id, 'Regra OCR'),
+                'test-ocr-rule': () => {
+                    const modal = document.querySelector('#ocr-rule-form');
+                    if (!modal) return;
+                    const rule = {
+                        name: modal.querySelector('[name="name"]').value,
+                        type: modal.querySelector('[name="type"]').value,
+                        pattern: modal.querySelector('[name="pattern"]').value,
+                        associatedId: modal.querySelector('[name="associatedId"]') ? modal.querySelector('[name="associatedId"]').value : null
+                    };
+                    const testText = modal.querySelector('#ocr-tester-input').value;
+                    const result = LogicManager.testSingleOcrRule(testText, rule);
+                    const resultContainer = modal.querySelector('#ocr-tester-result');
+                    if (result.success) {
+                        resultContainer.innerHTML = `<span class="positive"><i class="fa-solid fa-check-circle"></i> <strong>Valor Extraído:</strong> ${result.value}</span>`;
+                    } else {
+                        resultContainer.innerHTML = `<span class="negative"><i class="fa-solid fa-times-circle"></i> <strong>Resultado:</strong> ${result.message}</span>`;
+                    }
+                },
                 'cancel-lancar-form': () => { document.getElementById('form-lancamento-container').innerHTML = ''; },
                 'change-chart-type': () => { this.state.dashboardChartType = target.dataset.chart; this.renderCurrentView(); },
                 'toggle-menu': () => { document.querySelectorAll('.card-actions-menu').forEach(m => { if (m.dataset.menuId !== id) m.classList.add('hidden'); }); document.querySelector(`.card-actions-menu[data-menu-id="${id}"]`)?.classList.toggle('hidden'); },
@@ -412,7 +430,8 @@ document.addEventListener('DOMContentLoaded', () => {
         setupModalEvents() {
             if (this.closeModalTimeout) clearTimeout(this.closeModalTimeout);
             this.elements.modalContainer.classList.add('visible');
-            this.elements.modalContainer.querySelectorAll('.close-modal-btn, .button-secondary').forEach(btn => {
+            // CORREÇÃO: O seletor agora é mais específico para não fechar o modal com botões de ação.
+            this.elements.modalContainer.querySelectorAll('.close-modal-btn, .modal-actions .button-secondary').forEach(btn => {
                 if (!btn.id?.includes('delete')) { 
                     btn.onclick = () => this.closeModal();
                 }

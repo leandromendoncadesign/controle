@@ -30,6 +30,58 @@ export function initLogicManager(state, firestore, planningSaver, renderView, re
     findItemNameGlobal = findNameFunc;
 }
 
+export function testSingleOcrRule(text, rule) {
+    if (!text || !rule || !rule.pattern || !rule.type) {
+        return { success: false, message: 'Dados de teste inválidos. Preencha o padrão, tipo e texto de teste.' };
+    }
+
+    try {
+        // 'i' para case-insensitive, 'm' para multiline
+        const match = text.match(new RegExp(rule.pattern, 'im'));
+
+        if (match) {
+            let extractedValue = null;
+            switch (rule.type) {
+                case 'value':
+                    if (match[1]) extractedValue = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+                    break;
+                case 'description':
+                    if (match[1]) extractedValue = match[1].trim().split('\n')[0];
+                    break;
+                case 'installments':
+                    if (match[1]) extractedValue = rule.name.toLowerCase().includes('vista') ? 1 : parseInt(match[1], 10);
+                    break;
+                case 'date':
+                    if (match.length > 3) { // Espera grupos de captura para dia, mês, ano
+                        const day = match[1];
+                        const monthStr = match[2];
+                        const year = match[3];
+                        const monthMap = { jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06', jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12' };
+                        const cleanedMonthStr = monthStr.toLowerCase().replace('.', '');
+                        const month = cleanedMonthStr.match(/^\d+$/) ? cleanedMonthStr.padStart(2, '0') : monthMap[cleanedMonthStr];
+                        if (month) {
+                            const fullYear = year.length === 2 ? `20${year}` : year;
+                            extractedValue = `${fullYear}-${month}-${day.padStart(2, '0')}`;
+                        }
+                    }
+                    break;
+                case 'establishmentId':
+                case 'accountId':
+                     extractedValue = `Associado a: ${findItemNameGlobal(rule.associatedId, rule.type === 'accountId' ? 'accounts' : 'establishments')}`;
+                     break;
+            }
+
+            // Verifica se um valor foi extraído e é válido
+            if (extractedValue !== null && (!isNaN(extractedValue) || (typeof extractedValue === 'string' && extractedValue))) {
+                return { success: true, value: extractedValue };
+            }
+        }
+        return { success: false, message: 'Nenhum valor correspondente encontrado.' };
+    } catch (e) {
+        return { success: false, message: `Erro no padrão Regex: ${e.message}` };
+    }
+}
+
 export function debouncedSavePlanning() {
     clearTimeout(planningSaveTimeout);
     planningSaveTimeout = setTimeout(() => {
@@ -234,15 +286,31 @@ export function launchOcr(renderFormFunc) {
         ocrButton.disabled = true;
         try {
             const { data: { text } } = await Tesseract.recognize(file, 'por');
-            const data = parseReceiptText(text);
-            renderFormFunc('saida', data);
-            if (data.description) {
-                setTimeout(() => {
-                    const form = document.getElementById('lancar-form');
-                    if (form) handleDescriptionChange(data.description, form);
-                }, 100);
+
+            // Etapa 1: Obter dados de regras específicas (valor, data, associações diretas, etc.)
+            let data = parseReceiptText(text);
+
+            // Etapa 2: Se nenhuma regra de associação direta encontrou o estabelecimento, fazer a "varredura global".
+            if (!data.establishmentId) {
+                const establishmentIdFromScan = findEstablishmentByGlobalScan(text, appState.establishments);
+                if (establishmentIdFromScan) {
+                    data.establishmentId = establishmentIdFromScan;
+                }
             }
-            if (Object.keys(data).length === 0) {
+
+            // Etapa 3: Renderizar o formulário com todos os dados encontrados.
+            renderFormFunc('saida', data);
+
+            // Etapa 4: Após o formulário renderizar, se um estabelecimento foi encontrado (por qualquer método),
+            // acionar a busca pela categoria padrão.
+            setTimeout(() => {
+                const form = document.getElementById('lancar-form');
+                if (form && data.establishmentId) {
+                    handleEstablishmentChange(data.establishmentId, form);
+                }
+            }, 100);
+
+            if (Object.keys(data).length <= 1 && !data.establishmentId) {
                  showToast('Não foi possível extrair dados do comprovante.', 'error');
             }
         } catch (error) {
@@ -256,52 +324,89 @@ export function launchOcr(renderFormFunc) {
     fileInput.click();
 }
 
+
 export function parseReceiptText(text) {
     const data = {};
-    const types = ['value', 'date', 'description', 'installments'];
-    types.forEach(type => {
-        const rules = (appState.ocrRules || []).filter(r => r.type === type && r.enabled).sort((a,b) => (a.priority || 99) - (b.priority || 99));
-        for (const rule of rules) {
-            if (data[type]) break;
-            const match = text.match(new RegExp(rule.pattern, 'i'));
-            if (match && match[1]) {
-                if (type === 'value') data.value = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
-                else if (type === 'description') data.description = match[1].trim().split('\n')[0];
-                else if (type === 'installments') data.installments = rule.name.includes('Vista') ? 1 : parseInt(match[1], 10);
-                else if (type === 'date' && match.length > 3) {
-                    const monthMap = { jan:'01', fev:'02', mar:'03', abr:'04', mai:'05', jun:'06', jul:'07', ago:'08', set:'09', out:'10', nov:'11', dez:'12' };
-                    const monthStr = match[2].toLowerCase().replace('.','');
-                    const month = monthStr.match(/^\d+$/) ? monthStr.padStart(2, '0') : monthMap[monthStr];
-                    if (month) data.date = `${match[3]}-${month}-${match[1].padStart(2, '0')}`;
+    const rules = (appState.ocrRules || [])
+        .filter(r => r && r.enabled && r.pattern) // Garante que a regra é válida
+        .sort((a, b) => (a.priority || 99) - (b.priority || 99));
+
+    for (const rule of rules) {
+        if (data[rule.type]) {
+            continue;
+        }
+
+        try {
+            const match = text.match(new RegExp(rule.pattern, 'im'));
+
+            if (match) {
+                switch (rule.type) {
+                    case 'value':
+                        if (match[1]) data.value = parseFloat(match[1].replace(/\./g, '').replace(',', '.'));
+                        break;
+                    case 'description':
+                        if (match[1]) data.description = match[1].trim().split('\n')[0];
+                        break;
+                    case 'installments':
+                        if (match[1]) data.installments = rule.name.toLowerCase().includes('vista') ? 1 : parseInt(match[1], 10);
+                        break;
+                    case 'date':
+                        if (match.length > 3) {
+                            const day = match[1];
+                            const monthStr = match[2];
+                            const year = match[3];
+                            const monthMap = { jan: '01', fev: '02', mar: '03', abr: '04', mai: '05', jun: '06', jul: '07', ago: '08', set: '09', out: '10', nov: '11', dez: '12' };
+                            const cleanedMonthStr = monthStr.toLowerCase().replace('.', '');
+                            const month = cleanedMonthStr.match(/^\d+$/) ? cleanedMonthStr.padStart(2, '0') : monthMap[cleanedMonthStr];
+                            if (month) {
+                                const fullYear = year.length === 2 ? `20${year}` : year;
+                                data.date = `${fullYear}-${month}-${day.padStart(2, '0')}`;
+                            }
+                        }
+                        break;
+                    case 'establishmentId':
+                        if (rule.associatedId) data.establishmentId = rule.associatedId;
+                        break;
+                    case 'accountId':
+                        if (rule.associatedId) data.accountId = rule.associatedId;
+                        break;
                 }
             }
+        } catch (e) {
+            console.warn(`Regra de OCR inválida encontrada: "${rule.name}". Padrão: "${rule.pattern}". Erro:`, e);
         }
-    });
+    }
+
     return data;
 }
 
-export function handleDescriptionChange(description, form) {
-    const establishmentSelect = form.querySelector('select[name="establishmentId"]');
-    if (!establishmentSelect || !description) return;
-
-    const normalizedText = description.trim().toLowerCase();
-    
+function findEstablishmentByGlobalScan(text, establishments) {
+    const normalizedText = text.toLowerCase();
     let bestMatch = null;
 
-    for (const est of appState.establishments) {
-        const aliases = (est.aliases || []).map(a => a.toLowerCase().trim()).filter(Boolean);
-        for (const alias of aliases) {
-            if (normalizedText.includes(alias)) {
-                if (!bestMatch || alias.length > bestMatch.alias.length) {
-                    bestMatch = { establishmentId: est.id, alias: alias };
+    for (const est of establishments) {
+        const searchTerms = [est.name, ...(est.aliases || [])]
+            .map(term => term ? term.toLowerCase().trim() : '')
+            .filter(Boolean);
+
+        for (const term of searchTerms) {
+            if (normalizedText.includes(term)) {
+                if (!bestMatch || term.length > bestMatch.term.length) {
+                    bestMatch = { establishmentId: est.id, term: term };
                 }
             }
         }
     }
-    
-    if (bestMatch) {
-        establishmentSelect.value = bestMatch.establishmentId;
-        handleEstablishmentChange(bestMatch.establishmentId, form);
+    return bestMatch ? bestMatch.establishmentId : null;
+}
+
+
+export function handleDescriptionChange(description, form) {
+    const establishmentId = findEstablishmentByGlobalScan(description, appState.establishments);
+    if (establishmentId) {
+        const establishmentSelect = form.querySelector('select[name="establishmentId"]');
+        establishmentSelect.value = establishmentId;
+        handleEstablishmentChange(establishmentId, form);
     }
 }
 
@@ -321,7 +426,7 @@ export function setupReportGenerator(generateReportFunc) {
     const itemSelector = form.querySelector('#report-item-selector');
     const keywordInput = form.querySelector('#report-keyword-input');
     const dateStartInput = form.querySelector('#report-date-start');
-    const dateEndInput = form.querySelector('#report-date-end');
+    const dateEndInput = document.querySelector('#report-date-end');
 
     const updateUI = () => {
         const type = typeSelector.value;
