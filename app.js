@@ -187,10 +187,23 @@ document.addEventListener('DOMContentLoaded', () => {
             const docId = `planejamento_${this.state.currentMonthYear}`;
             const docRef = this.db.collection('financeiro_planejamento').doc(docId);
             this.state.planningListener = docRef.onSnapshot(async (doc) => {
+                // Se o snapshot tiver escritas pendentes, significa que a alteração veio deste cliente.
+                // Não fazemos o re-render completo para evitar que o teclado feche durante a digitação.
+                if (doc.metadata.hasPendingWrites) {
+                    // Apenas atualizamos o resumo, que é uma operação não-destrutiva.
+                    if (this.state.currentView === 'planning') UIRenderer.updateSummary();
+                    return;
+                }
+
+                // Se a alteração veio do servidor (outra aba, por ex.), aí sim atualizamos tudo.
                 const planningDoc = doc.data();
                 this.state.planningData = (doc.exists && planningDoc && planningDoc.planningData) ? planningDoc.planningData : { receitas: [], despesas: [] };
+                
                 await LogicManager.syncAutomaticInvoices();
-                if (this.state.currentView === 'planning') UIRenderer.renderAllPlanningSections();
+                
+                if (this.state.currentView === 'planning') {
+                    UIRenderer.renderAllPlanningSections();
+                }
             }, err => console.error("Erro no listener de planejamento:", err));
         },
 
@@ -282,7 +295,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const target = e.target.closest('[data-action]');
             if (!target) {
                 const menu = document.querySelector('.card-actions-menu:not(.hidden)');
-                if (menu && !e.target.closest('.card-actions-button')) menu.classList.add('hidden');
+                // CORREÇÃO: O menu só fecha se o clique for fora dele E fora do botão que o abre.
+                if (menu && !e.target.closest('.card-actions-button') && !e.target.closest('.card-actions-menu')) {
+                    menu.classList.add('hidden');
+                }
                 const item = e.target.closest('.transaction-list-item');
                 if (item && !e.target.closest('[data-action]')) { 
                     const trans = this.state.allTransactions.find(t => t.id === item.dataset.id);
