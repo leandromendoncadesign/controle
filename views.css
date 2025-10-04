@@ -74,6 +74,10 @@ body:not(.is-loading) #auth-container.is-visible {
 /* ====================================================================== */
 .kpi-card {
     text-align: center;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 .kpi-card .value {
     font-size: 1.5rem;
@@ -260,6 +264,15 @@ body:not(.is-loading) #auth-container.is-visible {
     font-size: 0.875rem;
     color: var(--text-secondary);
 }
+.installment-badge {
+    font-size: 0.7rem;
+    padding: 2px 6px;
+    border-radius: var(--radius-s);
+    background-color: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--separator-color);
+    margin-left: 4px;
+}
 .transaction-list-item .amount-details {
     text-align: right;
     flex-shrink: 0;
@@ -276,10 +289,13 @@ body:not(.is-loading) #auth-container.is-visible {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.625rem 0;
+    padding: 0.75rem 0;
     border-bottom: 1px solid var(--separator-color);
 }
 .detail-row:last-child {
+    border-bottom: none;
+}
+.detail-row.no-border-bottom {
     border-bottom: none;
 }
 .detail-row .label {
@@ -291,6 +307,7 @@ body:not(.is-loading) #auth-container.is-visible {
 }
 .detail-row .value {
     font-weight: 500;
+    text-align: right;
 }
 
 .invoice-selector-container {
@@ -421,6 +438,285 @@ body:not(.is-loading) #auth-container.is-visible {
 .planning-view-container .button-icon.delete-icon { color: var(--accent-red); }
 .planning-view-container .button-icon.sync-icon { color: var(--accent-purple); }
 
+/* ====================================================================== */
+/* TELA DE CONFIGURAÇÕES */
+/* ====================================================================== */
+.settings-menu {
+    padding: 0.5rem;
+}
+.settings-menu-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    text-decoration: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: var(--radius-m);
+}
+.settings-menu-item:hover {
+    background-color: var(--bg-tertiary);
+}
+.settings-menu-item .icon-title {
+    font-weight: 500;
+}
+.settings-menu-item i.fa-chevron-right {
+    color: var(--text-secondary);
+}
+.settings-section {
+    padding-top: 1.5rem;
+}
+.settings-section:first-child {
+    padding-top: 0;
+}
+.settings-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.item-list-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--separator-color);
+}
+.item-list-row:last-child {
+    border-bottom: none;
+}
+.item-list-row .icon-name {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-weight: 500;
+}
+.item-list-row .actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+
+/* ====================================================================== */
+/* ESTILOS DE MODAIS ESPECÍFICOS */
+/* ====================================================================== */
+.modal-actions {
+    justify-content: center;
+}
+.transaction-detail-header {
+    text-align: center;
+    padding-bottom: 1.25rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--separator-color);
+}
+.transaction-detail-value {
+    font-size: 2.25rem;
+    font-weight: 700;
+    display: block;
+    margin-bottom: 0.25rem;
+}
+.transaction-detail-description {
+    font-size: 1.125rem;
+    color: var(--text-secondary);
+}
+
+/* --- Estilos para Modal de Gerenciamento de Parcelas --- */
+#modal-container .modal-header p {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-top: 4px;
+    font-weight: 400;
+}
+.installments-list {
+    display: flex;
+    flex-direction: column;
+}
+.installment-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.75rem;
+    border-radius: var(--radius-s);
+}
+.installment-row:hover {
+    background-color: var(--bg-tertiary);
+}
+.installment-info {
+    display: flex;
+    flex-direction: column;
+}
+.installment-desc {
+    font-weight: 500;
+}
+.installment-date {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+.installment-actions .button-primary,
+.installment-actions .button-accent {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
+    min-height: 32px;
+}
+.status-badge {
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 20px;
+    text-transform: uppercase;
+}
+.status-badge.open { color: var(--accent-blue); background-color: rgba(0, 122, 255, 0.1); }
+.status-badge.anticipated { color: var(--accent-purple); background-color: rgba(138, 58, 185, 0.1); }
+.status-badge.paid { color: var(--accent-green); background-color: rgba(52, 199, 89, 0.1); }
+
+/* --- Estilos para Modal de Antecipação de Parcela --- */
+.modal-subtitle {
+    text-align: center;
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+    line-height: 1.4;
+}
+.card-details.compact {
+    background: var(--bg-tertiary);
+    padding: 0.25rem 1rem;
+    border-radius: var(--radius-m);
+    border: 1px solid var(--separator-color);
+}
+.card-details.compact .detail-row {
+    padding: 0.4rem 0;
+}
+.card-details.compact .detail-row .value {
+    font-weight: 400;
+}
+.card-details.compact .detail-row.summary {
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-top: 1px solid var(--separator-color);
+    margin-top: 0.4rem;
+    padding-top: 0.6rem;
+}
+.card-details.compact .detail-row.summary .value {
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+.input-group-currency.small {
+    width: auto;
+}
+.input-group-currency.small input {
+    max-width: 140px;
+    padding: 0.5rem 0.75rem 0.5rem 2.5rem !important;
+    font-size: 1rem;
+    background-color: var(--bg-secondary);
+    text-align: right;
+}
+.input-group-currency.small .currency-symbol {
+    left: 0.75rem;
+}
+#discount-value:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+}
+
+
+/* --- Estilos para Submenu de Ações (se usado em outros locais) --- */
+.actions-submenu {
+    position: absolute;
+    background-color: var(--bg-secondary);
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow);
+    list-style: none;
+    padding: 0.5rem;
+    z-index: 1010;
+    border: 1px solid var(--separator-color);
+}
+.actions-submenu-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.9375rem;
+    border-radius: var(--radius-s);
+}
+.actions-submenu-item:hover {
+    background-color: var(--bg-tertiary);
+}
+
+/* --- Estilos para Dropdown Customizado --- */
+.custom-dropdown {
+    position: relative;
+    width: 100%;
+    font-family: var(--font-family);
+}
+.custom-dropdown-selected {
+    position: relative;
+    width: 100%;
+    padding: 0.75rem 0.875rem;
+    border: 1px solid var(--input-border-color);
+    border-radius: var(--radius-s);
+    background-color: var(--bg-tertiary);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: border-color var(--animation-speed) ease, box-shadow var(--animation-speed) ease;
+}
+.custom-dropdown-selected:hover,
+.custom-dropdown.active .custom-dropdown-selected {
+    outline: none;
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.2);
+}
+.custom-dropdown-selected .placeholder {
+    color: var(--text-secondary);
+}
+.custom-dropdown-selected .selected-text {
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.custom-dropdown-selected i {
+    color: var(--text-secondary);
+    transition: transform var(--animation-speed) ease;
+}
+.custom-dropdown.active .custom-dropdown-selected i {
+    transform: rotate(180deg);
+}
+.custom-dropdown-options {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 100%;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--separator-color);
+    border-radius: var(--radius-s);
+    box-shadow: var(--shadow);
+    list-style: none;
+    padding: 0.75rem 0.5rem;
+    z-index: 1011;
+    max-height: 160px;
+    overflow-y: auto;
+}
+.custom-dropdown-option {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    border-radius: var(--radius-s);
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.custom-dropdown-option:hover {
+    background-color: var(--bg-tertiary);
+}
+.custom-dropdown-option.selected {
+    background-color: rgba(0, 122, 255, 0.1);
+    font-weight: 500;
+}
+
 
 /* ====================================================================== */
 /* RESPONSIVIDADE */
@@ -474,7 +770,6 @@ body:not(.is-loading) #auth-container.is-visible {
         grid-template-columns: 1fr;
     }
 
-    /* CORREÇÃO FINAL LAYOUT MOBILE PLANEJAMENTO */
     .planning-view-container .item {
         display: flex;
         flex-wrap: wrap;

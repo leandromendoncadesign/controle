@@ -19,20 +19,16 @@ export async function saveTransaction(form, isEdit = false) {
     submitButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Salvando...`;
 
     const batch = db.batch();
-    let shouldCheckForMonthAdvance = false;
-    let monthYearToCheck;
 
     try {
         data.value = parseFloat(String(data.value).replace(',', '.')) || 0;
         if (data.value <= 0) throw new Error("O valor deve ser positivo.");
         const dateString = data.date;
-        const transactionDate = new Date(`${dateString}T12:00:00`);
-        const transactionMonthYear = `${(transactionDate.getMonth() + 1).toString().padStart(2, '0')}-${transactionDate.getFullYear()}`;
 
         if (type === 'transferencia') {
             if (data.sourceAccountId === data.destinationAccountId) throw new Error("As contas devem ser diferentes.");
             const transferId = db.collection('financeiro_lancamentos').doc().id;
-            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(transactionDate), monthYear: transactionMonthYear, transferId };
+            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(new Date(`${dateString}T12:00:00`)), monthYear: `${(new Date(dateString).getMonth() + 1).toString().padStart(2, '0')}-${new Date(dateString).getFullYear()}`, transferId };
             const sourceName = appState.accounts.find(a => a.id === data.sourceAccountId)?.name || 'N/A';
             const destName = appState.accounts.find(a => a.id === data.destinationAccountId)?.name || 'N/A';
             batch.set(db.collection('financeiro_lancamentos').doc(), { ...commonData, accountId: data.sourceAccountId, type: 'Transferência', description: `Para ${destName}` });
@@ -40,10 +36,8 @@ export async function saveTransaction(form, isEdit = false) {
             updateAccountBalance(data.sourceAccountId, data.value, 'Saída', false, batch);
             updateAccountBalance(data.destinationAccountId, data.value, 'Entrada', false, batch);
         } else if (type === 'pagarFatura') {
-            shouldCheckForMonthAdvance = true;
-            monthYearToCheck = appState.currentMonthYear; // Usa o mês que o usuário está visualizando
             const paymentId = db.collection('financeiro_lancamentos').doc().id;
-            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(transactionDate), monthYear: transactionMonthYear, paymentId, invoiceMonthYear: data.invoiceMonthYear };
+            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(new Date(`${dateString}T12:00:00`)), monthYear: `${(new Date(dateString).getMonth() + 1).toString().padStart(2, '0')}-${new Date(dateString).getFullYear()}`, paymentId, invoiceMonthYear: data.invoiceMonthYear };
             const sourceName = appState.accounts.find(a => a.id === data.sourceAccountId)?.name || 'N/A';
             const destName = appState.accounts.find(a => a.id === data.destinationAccountId)?.name || 'N/A';
             batch.set(db.collection('financeiro_lancamentos').doc(), { ...commonData, accountId: data.sourceAccountId, type: 'Pagamento de Fatura', description: `Pag. Fatura ${destName}`, destinationAccountId: data.destinationAccountId });
@@ -86,7 +80,7 @@ export async function saveTransaction(form, isEdit = false) {
             form.querySelector('[name="description"]')?.focus();
         }
         showToast('Lançamento salvo com sucesso!', 'success');
-        return { success: true, isEdit, shouldCheckForMonthAdvance, monthYear: monthYearToCheck };
+        return { success: true, isEdit };
     } catch (error) {
         console.error("Erro em saveTransaction:", error);
         showToast(error.message || 'Ocorreu um erro ao salvar.', 'error');
@@ -245,5 +239,64 @@ export async function saveAssociation(form) {
         console.error("Erro ao salvar associação:", error);
         showToast('Não foi possível adicionar o apelido.', 'error');
         return false;
+    }
+}
+
+export async function anticipateInstallmentTransaction(form) {
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+    const { installmentId, sourceAccountId, discountValue, finalValue } = data;
+
+    const submitButton = form.querySelector('[type="submit"]');
+    submitButton.disabled = true;
+    submitButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processando...`;
+
+    try {
+        const installment = appState.allTransactions.find(t => t.id === installmentId);
+        if (!installment) throw new Error("Parcela original não encontrada.");
+        if (!sourceAccountId) throw new Error("Selecione uma conta para pagamento.");
+        
+        const finalNumericValue = parseFloat(finalValue);
+        if (isNaN(finalNumericValue) || finalNumericValue < 0) throw new Error("Valor final inválido.");
+
+        const batch = db.batch();
+        const now = new Date();
+
+        // 1. Cria a nova transação de saída da conta corrente
+        const paymentData = {
+            description: `Pag. Antecipado: ${installment.description.replace(/ \[\d+\/\d+\]$/, '')}`,
+            value: finalNumericValue,
+            date: firebase.firestore.Timestamp.fromDate(now),
+            monthYear: `${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`,
+            accountId: sourceAccountId,
+            type: 'Saída',
+            categoryId: installment.categoryId,
+            relatedInstallmentId: installmentId
+        };
+        batch.set(db.collection('financeiro_lancamentos').doc(), paymentData);
+
+        // 2. Atualiza a parcela original no cartão de crédito
+        const installmentUpdate = {
+            status: 'Antecipada', // Novo campo para indicar o estado
+            paidValue: finalNumericValue,
+            discount: parseFloat(discountValue) || 0,
+            paymentDate: firebase.firestore.Timestamp.fromDate(now)
+        };
+        batch.update(db.collection('financeiro_lancamentos').doc(installmentId), installmentUpdate);
+
+        // 3. Atualiza o saldo da conta corrente
+        updateAccountBalance(sourceAccountId, finalNumericValue, 'Saída', false, batch);
+
+        await batch.commit();
+        showToast('Parcela antecipada com sucesso!', 'success');
+        return { success: true };
+
+    } catch (error) {
+        console.error("Erro ao antecipar parcela:", error);
+        showToast(error.message || 'Ocorreu um erro ao antecipar a parcela.', 'error');
+        return { success: false };
+    } finally {
+        submitButton.disabled = false;
+        submitButton.innerHTML = 'Confirmar Antecipação';
     }
 }

@@ -28,6 +28,27 @@ export function initUIRenderer(state, dependencies) {
     exportReportToPdfGlobal = dependencies.exportReportToPdf;
 }
 
+function getCustomDropdownHtml(items, name, placeholder = 'Selecione...') {
+    const optionsHtml = items.map(item => `
+        <li class="custom-dropdown-option" data-action="select-custom-option" data-value="${item.id}">
+            ${item.name}
+        </li>
+    `).join('');
+
+    return `
+    <div class="custom-dropdown" data-name="${name}">
+        <input type="hidden" name="${name}" class="custom-dropdown-value" required>
+        <div class="custom-dropdown-selected" data-action="toggle-custom-dropdown">
+            <span class="placeholder">${placeholder}</span>
+            <i class="fa-solid fa-chevron-down"></i>
+        </div>
+        <ul class="custom-dropdown-options hidden">
+            ${optionsHtml}
+        </ul>
+    </div>
+    `;
+}
+
 export function getResumosHtml() {
     const transactionsThisMonth = appState.allTransactions.filter(t => t && t.monthYear === appState.currentMonthYear);
     const totalIncome = transactionsThisMonth.filter(t => t.type === 'Entrada').reduce((sum, t) => sum + t.value, 0);
@@ -107,7 +128,7 @@ export function getInvoicesHtml() {
         return `<div class="view-header"><h2><i class="fa-solid fa-file-invoice-dollar"></i> Faturas</h2></div>
         <div class="card"><div class="empty-state"><i class="fa-solid fa-credit-card"></i><p>Nenhum cartão de crédito ativo cadastrado.</p></div></div>`;
     }
-    const totalOpenInvoices = creditCards.reduce((sum, card) => sum + calculateInvoiceDetailsGlobal(card.id, true).openInvoiceTotal, 0);
+    const totalOpenInvoices = creditCards.reduce((sum, card) => sum + calculateInvoiceDetailsGlobal(card.id, new Date()).openInvoiceTotal, 0);
     const totalLimit = creditCards.reduce((sum, card) => sum + (card.limit || 0), 0);
     const summaryHtml = `
     <div class="card" style="margin-top: 24px;">
@@ -490,13 +511,17 @@ export function getTransactionHtml(transaction, showAccount = true) {
     const category = appState.categories.find(c => c && c.id === transaction.categoryId);
 
     const primaryText = transaction.establishmentId ? findItemNameGlobal(transaction.establishmentId, 'establishments') : transaction.description;
-    const secondaryText = showAccount && account ? account.name : category?.name || transaction.type;
+    
+    let secondaryText = showAccount && account ? account.name : category?.name || transaction.type;
+    if (transaction.installmentGroupId) {
+        secondaryText += ` <span class="installment-badge"><i class="fa-solid fa-clone"></i> Parcelada</span>`;
+    }
 
     let isPositive = transaction.type === 'Entrada';
     let amountClass = isPositive ? 'positive' : 'negative';
     let amountSign = isPositive ? '+' : '-';
 
-    if (transaction.type === 'Transferência' || transaction.type === 'Pagamento de Fatura') {
+    if (transaction.type === 'Transferência' || transaction.type === 'Pagamento de Fatura' || transaction.status === 'Antecipada') {
         amountClass = 'neutral';
         amountSign = '';
     }
@@ -692,7 +717,6 @@ export function showReportModal({transactions, title, summary}) {
             ${summaryHtml}
         </div>
         <div class="modal-actions">
-            <button type="button" class="button-secondary close-modal-btn">Fechar</button>
             <button type="button" id="export-report-pdf-btn" class="button-primary"><i class="fa-solid fa-file-pdf"></i> Gerar PDF</button>
         </div>
     </div>`;
@@ -721,7 +745,6 @@ function getGenericModalHtml(formId, title, item = {}, fields = []) {
             </div>
             <div class="modal-body">${fieldsHtml}</div>
             <div class="modal-actions">
-                <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
                 <button type="submit" class="button-primary">Salvar</button>
             </div>
         </form>
@@ -771,7 +794,6 @@ export function showAccountModal(accountId = null) {
         </div>
     </div>
     <div class="modal-actions">
-        <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
         <button type="submit" form="account-form" class="button-primary">Salvar</button>
     </div>
     </form>
@@ -847,7 +869,6 @@ export function showEstablishmentModal(establishmentId = null) {
                 </div>
                 <div class="modal-body">${fieldsHtml}</div>
                 <div class="modal-actions">
-                    <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
                     <button type="submit" class="button-primary">Salvar</button>
                 </div>
             </form>
@@ -927,7 +948,6 @@ export function showOcrRuleModal(ruleId = null) {
                 </div>
             </div>
             <div class="modal-actions">
-                <button type="button" class="button-secondary close-modal-btn">Cancelar</button>
                 <button type="submit" class="button-primary">Salvar Regra</button>
             </div>
         </form>
@@ -1030,7 +1050,7 @@ export function showAddAliasModal(description) {
                 <p>Associar o texto <strong>"${description}"</strong> a qual estabelecimento?</p>
                 <div class="form-group"><label>Estabelecimento</label><select name="entidadeId" required><option value="">Selecione...</option>${options}</select></div>
             </div>
-            <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar Apelido</button></div>
+            <div class="modal-actions"><button type="submit" class="button-primary">Salvar Apelido</button></div>
         </form>
     </div>`;
     setupModalEventsGlobal();
@@ -1042,36 +1062,238 @@ export function showTransactionDetailsModal(transaction) {
     const isDebit = transaction.type === 'Saída';
     const amountClass = isDebit ? 'negative' : 'positive';
     const amountSign = isDebit ? '-' : '+';
-    const accountName = findItemNameGlobal(transaction.accountId, 'accounts');
+    
+    const account = appState.accounts.find(a => a.id === transaction.accountId);
     const categoryName = findItemNameGlobal(transaction.categoryId, 'categories');
     const personName = transaction.personId ? findItemNameGlobal(transaction.personId, 'people') : null;
     const establishmentName = transaction.establishmentId ? findItemNameGlobal(transaction.establishmentId, 'establishments') : null;
+    
     const canBeModified = transaction.type !== 'Pagamento de Fatura' && transaction.type !== 'Transferência';
-    let actionButtons = '';
-    if (canBeModified) {
-        actionButtons = `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button><button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>`;
+    const isSingleCreditCardPurchase = account?.type === 'Cartão de Crédito' && !transaction.installmentGroupId && transaction.type === 'Saída';
+
+    let installmentDetailsHtml = '';
+    if (transaction.installmentGroupId) {
+        const allInstallments = appState.allTransactions
+            .filter(t => t.installmentGroupId === transaction.installmentGroupId)
+            .sort((a, b) => getDateObject(a.date) - getDateObject(b.date));
+        const totalInstallments = allInstallments.length;
+        const currentInstallmentIndex = allInstallments.findIndex(t => t.id === transaction.id) + 1;
+
+        if (totalInstallments > 0) {
+            installmentDetailsHtml = `
+            <div class="detail-row">
+                <span class="label"><i class="fa-solid fa-clone"></i> Parcelamento</span>
+                <span class="value">${currentInstallmentIndex} de ${totalInstallments}</span>
+            </div>`;
+        }
     }
-    document.getElementById('modal-container').innerHTML = `
+
+    let actionButtons = '';
+    if (isSingleCreditCardPurchase) {
+        actionButtons += `<button type="button" class="button-primary" data-action="show-parcelar-compra-modal" data-id="${transaction.id}"><i class="fa-solid fa-clone"></i> Parcelar Compra</button>`;
+    }
+    
+    if (canBeModified) {
+        if (transaction.installmentGroupId) {
+             actionButtons += `<button type="button" class="button-accent" data-action="show-installment-management" data-group-id="${transaction.installmentGroupId}"><i class="fa-solid fa-list-check"></i> Gerenciar</button>`;
+        }
+        actionButtons += `<button type="button" class="button-primary" data-action="edit-from-details" data-id="${transaction.id}"><i class="fa-solid fa-pencil"></i> Editar</button>`;
+        actionButtons += `<button type="button" class="button-danger" data-action="delete-transaction" data-id="${transaction.id}"><i class="fa-solid fa-trash"></i> Excluir</button>`;
+    }
+
+    const modalHtml = `
     <div class="modal-content">
-        <div class="modal-header"><h2>Detalhes da Movimentação</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div>
+        <div class="modal-header">
+            <h2>Detalhes da Movimentação</h2>
+            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+        </div>
         <div class="modal-body">
-            <div class="transaction-detail-header"><span class="transaction-detail-value ${amountClass}">${amountSign} ${formatCurrency(transaction.value)}</span><span class="transaction-detail-description">${transaction.description}</span></div>
+            <div class="transaction-detail-header">
+                <span class="transaction-detail-value ${amountClass}">${amountSign} ${formatCurrency(transaction.value)}</span>
+                <span class="transaction-detail-description">${transaction.description}</span>
+            </div>
             <div class="card-details" style="background: transparent; padding: 0; margin-top: 16px;">
-                <div class="detail-row"><span class="label">Data</span><span class="value">${formattedDate}</span></div>
-                <div class="detail-row"><span class="label">Conta</span><span class="value">${accountName}</span></div>
-                <div class="detail-row"><span class="label">Categoria</span><span class="value">${categoryName}</span></div>
-                ${personName ? `<div class="detail-row"><span class="label">Pessoa</span><span class="value">${personName}</span></div>` : ''}
-                ${establishmentName ? `<div class="detail-row"><span class="label">Estabelecimento</span><span class="value">${establishmentName}</span></div>` : ''}
+                <div class="detail-row"><span class="label"><i class="fa-solid fa-calendar-days"></i> Data</span><span class="value">${formattedDate}</span></div>
+                <div class="detail-row"><span class="label"><i class="fa-solid fa-building-columns"></i> Conta</span><span class="value">${account.name}</span></div>
+                <div class="detail-row"><span class="label"><i class="fa-solid fa-tag"></i> Categoria</span><span class="value">${categoryName}</span></div>
+                ${personName ? `<div class="detail-row"><span class="label"><i class="fa-solid fa-user"></i> Pessoa</span><span class="value">${personName}</span></div>` : ''}
+                ${establishmentName ? `<div class="detail-row"><span class="label"><i class="fa-solid fa-store"></i> Estabelecimento</span><span class="value">${establishmentName}</span></div>` : ''}
+                ${installmentDetailsHtml}
             </div>
         </div>
-        <div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Fechar</button>${actionButtons}</div>
+        <div class="modal-actions">${actionButtons}</div>
     </div>`;
+
+    document.getElementById('modal-container').innerHTML = modalHtml;
+    setupModalEventsGlobal();
+}
+
+export function showParcelarCompraModal(transaction) {
+    const modalHtml = `
+    <div class="modal-content">
+        <form id="parcelar-compra-form">
+            <input type="hidden" name="transactionId" value="${transaction.id}">
+            <div class="modal-header">
+                <h2>Parcelar Compra</h2>
+                <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    Converter a compra <strong>"${transaction.description}"</strong> no valor de <strong>${formatCurrency(transaction.value)}</strong> em um novo parcelamento.
+                </p>
+                <div class="form-group">
+                    <label for="installments-input">Número de Parcelas</label>
+                    <input type="number" id="installments-input" name="installments" min="2" placeholder="Ex: 10" required>
+                </div>
+                <div class="form-group">
+                    <label for="total-value-input">Valor Total Parcelado (com juros, se houver)</label>
+                    <div class="input-group-currency">
+                        <span class="currency-symbol">R$</span>
+                        <input type="number" id="total-value-input" name="totalValue" step="0.01" placeholder="0,00" required>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="submit" class="button-primary">Salvar Parcelamento</button>
+            </div>
+        </form>
+    </div>`;
+    document.getElementById('modal-container').innerHTML = modalHtml;
+    setupModalEventsGlobal();
+}
+
+export function showInstallmentManagementModal(groupId) {
+    const installments = appState.allTransactions
+        .filter(t => t.installmentGroupId === groupId)
+        .sort((a, b) => getDateObject(a.date) - getDateObject(b.date));
+
+    if (installments.length === 0) {
+        showToast('Nenhuma parcela encontrada.', 'error');
+        return;
+    }
+
+    const firstInstallment = installments[0];
+    const mainDescription = firstInstallment.description.replace(/ \[\d+\/\d+\]$/, '');
+
+    const installmentsHtml = installments.map(inst => {
+        const date = getDateObject(inst.date);
+        const formattedDate = date.toLocaleDateString('pt-BR');
+        const isAnticipated = inst.status === 'Antecipada';
+        
+        let statusBadge = `<span class="status-badge open">Aberta</span>`;
+        if (isAnticipated) {
+            statusBadge = `<span class="status-badge anticipated">Antecipada</span>`;
+        }
+        
+        const actionButton = !isAnticipated
+            ? `<button class="button-primary" data-action="show-anticipate-modal" data-id="${inst.id}">Antecipar</button>`
+            : '';
+
+        return `
+            <div class="installment-row">
+                <div class="installment-info">
+                    <span class="installment-desc">${inst.description}</span>
+                    <span class="installment-date">${formattedDate} - ${formatCurrency(inst.value)}</span>
+                </div>
+                <div class="installment-status">
+                    ${statusBadge}
+                </div>
+                <div class="installment-actions">
+                    ${actionButton}
+                </div>
+            </div>`;
+    }).join('');
+
+    const modalHtml = `
+    <div class="modal-content" style="max-width: 600px;">
+        <div class="modal-header">
+            <div>
+                <h2>Gerenciar Parcelamento</h2>
+                <p>${mainDescription}</p>
+            </div>
+            <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="installments-list">${installmentsHtml}</div>
+        </div>
+        <div class="modal-actions"></div>
+    </div>`;
+
+    document.getElementById('modal-container').innerHTML = modalHtml;
+    setupModalEventsGlobal();
+}
+
+export function showAnticipateInstallmentModal(installmentId) {
+    const installment = appState.allTransactions.find(t => t.id === installmentId);
+    if (!installment) return;
+
+    const checkingAccounts = appState.accounts.filter(a => a.type === 'Conta Corrente' && !a.arquivado);
+    const accountsDropdownHtml = getCustomDropdownHtml(checkingAccounts, 'sourceAccountId', 'Selecione a conta...');
+
+    const modalHtml = `
+    <div class="modal-content">
+        <form id="anticipate-installment-form">
+            <input type="hidden" name="installmentId" value="${installment.id}">
+            <input type="hidden" id="final-value-input" name="finalValue" value="${installment.value}">
+            <div class="modal-header">
+                <h2>Antecipar Parcela</h2>
+                <button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-subtitle">Você está antecipando a parcela:<br><strong>${installment.description}</strong></p>
+                
+                <div class="card-details compact">
+                    <div class="detail-row">
+                        <span class="label"><i class="fa-solid fa-file-invoice-dollar"></i> Valor Original</span>
+                        <span class="value">${formatCurrency(installment.value)}</span>
+                    </div>
+                    <div class="detail-row no-border-bottom">
+                        <span class="label"><i class="fa-solid fa-tags"></i> Valor do Desconto</span>
+                        <div class="input-group-currency small">
+                            <span class="currency-symbol">R$</span>
+                            <input type="number" step="0.01" id="discount-value" name="discountValue" placeholder="0,00">
+                        </div>
+                    </div>
+                     <div class="detail-row summary">
+                        <span class="label">Valor Final</span>
+                        <span class="value positive" id="final-value-display">${formatCurrency(installment.value)}</span>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 1.5rem;">
+                    <label>Pagar com a conta</label>
+                    ${accountsDropdownHtml}
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="submit" class="button-primary">Confirmar Antecipação</button>
+            </div>
+        </form>
+    </div>`;
+
+    document.getElementById('modal-container').innerHTML = modalHtml;
+
+    const discountInput = document.getElementById('discount-value');
+    const finalValueDisplay = document.getElementById('final-value-display');
+    const finalValueInput = document.getElementById('final-value-input');
+
+    discountInput.addEventListener('input', () => {
+        const originalValue = installment.value;
+        const discount = parseFloat(discountInput.value) || 0;
+        const finalValue = originalValue - discount;
+        finalValueDisplay.textContent = formatCurrency(finalValue);
+        finalValueInput.value = finalValue.toFixed(2);
+    });
+
     setupModalEventsGlobal();
 }
 
 export function showTransactionModal(transactionId) {
     const transaction = appState.allTransactions.find(t => t.id === transactionId);
-    if (!transaction || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência' || transaction.installmentGroupId) return;
+    if (!transaction || transaction.type === 'Pagamento de Fatura' || transaction.type === 'Transferência') {
+        console.warn('Tentativa de editar transação bloqueada:', transaction);
+        return;
+    }
     const getOptions = (items, selectedId) => items.map(i => `<option value="${i.id}" ${i.id === selectedId ? 'selected' : ''}>${i.name}</option>`).join('');
     const dateInputValue = getLocalISODate(getDateObject(transaction.date));
     let formFields = `<div class="form-group"><label>Descrição</label><input type="text" name="description" value="${transaction.description || ''}" required></div><div class="form-group"><label>Valor</label><div class="input-group-currency"><span class="currency-symbol">R$</span><input type="number" name="value" value="${transaction.value || ''}" required></div></div><div class="form-group"><label>Data</label><input type="date" name="date" value="${dateInputValue}" required></div><div class="form-group"><label>Conta</label><select name="accountId" required>${getOptions(appState.accounts.filter(a => !a.arquivado), transaction.accountId)}</select></div><div class="form-group"><label>Categoria</label><select name="categoryId" required>${getOptions(appState.categories, transaction.categoryId)}</select></div>`;
@@ -1080,7 +1302,7 @@ export function showTransactionModal(transactionId) {
         formFields += `<div class="form-group"><label>Estabelecimento</label><select name="establishmentId"><option value="">Nenhum</option>${getOptions(appState.establishments, transaction.establishmentId)}</select></div>`;
     }
     document.getElementById('modal-container').innerHTML = `
-        <div class="modal-content"><form id="transaction-form"><input type="hidden" name="id" value="${transaction.id}"><div class="modal-header"><h2>Editar Lançamento</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${formFields}</div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Salvar</button></div></form></div>`;
+        <div class="modal-content"><form id="transaction-form"><input type="hidden" name="id" value="${transaction.id}"><div class="modal-header"><h2>Editar Lançamento</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body">${formFields}</div><div class="modal-actions"><button type="submit" class="button-primary">Salvar</button></div></form></div>`;
     setupModalEventsGlobal();
 }
 
@@ -1088,7 +1310,7 @@ export function showFilterModal() {
     const { type, accountId } = appState.movementsFilter;
     const accountOptions = `<option value="all" ${accountId === 'all' ? 'selected' : ''}>Todas</option>` + appState.accounts.map(acc => `<option value="${acc.id}" ${accountId === acc.id ? 'selected' : ''}>${acc.name}</option>`).join('');
     document.getElementById('modal-container').innerHTML = `
-    <div class="modal-content"><form id="filter-form"><div class="modal-header"><h2>Filtrar</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Tipo</label><select name="type"><option value="all" ${type === 'all' ? 'selected' : ''}>Todos</option><option value="Entrada" ${type === 'Entrada' ? 'selected' : ''}>Entradas</option><option value="Saída" ${type === 'Saída' ? 'selected' : ''}>Saídas</option></select></div><div class="form-group"><label>Conta</label><select name="accountId">${accountOptions}</select></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Aplicar</button></div></form></div>`;
+    <div class="modal-content"><form id="filter-form"><div class="modal-header"><h2>Filtrar</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group"><label>Tipo</label><select name="type"><option value="all" ${type === 'all' ? 'selected' : ''}>Todos</option><option value="Entrada" ${type === 'Entrada' ? 'selected' : ''}>Entradas</option><option value="Saída" ${type === 'Saída' ? 'selected' : ''}>Saídas</option></select></div><div class="form-group"><label>Conta</label><select name="accountId">${accountOptions}</select></div></div><div class="modal-actions"><button type="submit" class="button-primary">Aplicar</button></div></form></div>`;
     setupModalEventsGlobal();
 }
 
@@ -1096,6 +1318,6 @@ export function showSortModal() {
     const { key, order } = appState.movementsSort;
     const currentSort = `${key}-${order}`;
     document.getElementById('modal-container').innerHTML = `
-    <div class="modal-content"><form id="sort-form"><div class="modal-header"><h2>Ordenar</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group radio-group"><label><input type="radio" name="sort" value="date-desc" ${currentSort === 'date-desc' ? 'checked' : ''}> Mais Recentes</label><label><input type="radio" name="sort" value="date-asc" ${currentSort === 'date-asc' ? 'checked' : ''}> Mais Antigos</label><label><input type="radio" name="sort" value="value-desc" ${currentSort === 'value-desc' ? 'checked' : ''}> Maior Valor</label><label><input type="radio" name="sort" value="value-asc" ${currentSort === 'value-asc' ? 'checked' : ''}> Menor Valor</label></div></div><div class="modal-actions"><button type="button" class="button-secondary close-modal-btn">Cancelar</button><button type="submit" class="button-primary">Ordenar</button></div></form></div>`;
+    <div class="modal-content"><form id="sort-form"><div class="modal-header"><h2>Ordenar</h2><button type="button" class="close-modal-btn"><i class="fa-solid fa-times"></i></button></div><div class="modal-body"><div class="form-group radio-group"><label><input type="radio" name="sort" value="date-desc" ${currentSort === 'date-desc' ? 'checked' : ''}> Mais Recentes</label><label><input type="radio" name="sort" value="date-asc" ${currentSort === 'date-asc' ? 'checked' : ''}> Mais Antigos</label><label><input type="radio" name="sort" value="value-desc" ${currentSort === 'value-desc' ? 'checked' : ''}> Maior Valor</label><label><input type="radio" name="sort" value="value-asc" ${currentSort === 'value-asc' ? 'checked' : ''}> Menor Valor</label></div></div><div class="modal-actions"><button type="submit" class="button-primary">Ordenar</button></div></form></div>`;
     setupModalEventsGlobal();
 }

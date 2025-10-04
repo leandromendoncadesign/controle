@@ -191,7 +191,9 @@ export function calculateInvoiceDetails(cardId, referenceDate = null) {
 
     const invoiceKey = getInvoiceKeyForDate(date, card);
     const transactions = appState.allTransactions.filter(t => {
-        if (t?.accountId !== cardId || t.type !== 'Saída') return false;
+        // CORREÇÃO: Ignora transações antecipadas no cálculo da fatura
+        if (t?.accountId !== cardId || t.type !== 'Saída' || t.status === 'Antecipada') return false;
+        
         const transactionInvoiceKey = getInvoiceKeyForDate(getDateObject(t.date), card);
         return transactionInvoiceKey === invoiceKey;
     });
@@ -211,21 +213,21 @@ export function postRenderInvoices(getTransactionHtmlFunc) {
         const card = appState.accounts.find(a => a.id === cardId);
         if (!card) return;
 
-        // CORREÇÃO APLICADA AQUI: Usa o mês atual do app como referência, não a data de hoje.
         const [month, year] = appState.currentMonthYear.split('-');
         const referenceDateForView = new Date(year, month - 1, 15);
         const defaultInvoiceKey = getInvoiceKeyForDate(referenceDateForView, card);
         
         const previouslySelectedPeriod = periodSelector.value;
 
-        const transByInvoice = appState.allTransactions.filter(t => t?.accountId === cardId && t.type === 'Saída').reduce((acc, t) => {
-            const key = getInvoiceKeyForDate(getDateObject(t.date), card);
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(t);
-            return acc;
-        }, {});
+        const transByInvoice = appState.allTransactions
+            .filter(t => t?.accountId === cardId && t.type === 'Saída' && t.status !== 'Antecipada')
+            .reduce((acc, t) => {
+                const key = getInvoiceKeyForDate(getDateObject(t.date), card);
+                if (!acc[key]) acc[key] = [];
+                acc[key].push(t);
+                return acc;
+            }, {});
         
-        // Garante que a fatura do mês de visualização e a fatura em aberto (se diferentes) existam na lista
         if (!transByInvoice[defaultInvoiceKey]) {
             transByInvoice[defaultInvoiceKey] = [];
         }
