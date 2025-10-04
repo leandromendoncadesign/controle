@@ -19,16 +19,20 @@ export async function saveTransaction(form, isEdit = false) {
     submitButton.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Salvando...`;
 
     const batch = db.batch();
+    let shouldCheckForMonthAdvance = false;
+    let monthYearToCheck;
 
     try {
         data.value = parseFloat(String(data.value).replace(',', '.')) || 0;
         if (data.value <= 0) throw new Error("O valor deve ser positivo.");
         const dateString = data.date;
+        const transactionDate = new Date(`${dateString}T12:00:00`);
+        const transactionMonthYear = `${(transactionDate.getMonth() + 1).toString().padStart(2, '0')}-${transactionDate.getFullYear()}`;
 
         if (type === 'transferencia') {
             if (data.sourceAccountId === data.destinationAccountId) throw new Error("As contas devem ser diferentes.");
             const transferId = db.collection('financeiro_lancamentos').doc().id;
-            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(new Date(`${dateString}T12:00:00`)), monthYear: `${(new Date(dateString).getMonth() + 1).toString().padStart(2, '0')}-${new Date(dateString).getFullYear()}`, transferId };
+            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(transactionDate), monthYear: transactionMonthYear, transferId };
             const sourceName = appState.accounts.find(a => a.id === data.sourceAccountId)?.name || 'N/A';
             const destName = appState.accounts.find(a => a.id === data.destinationAccountId)?.name || 'N/A';
             batch.set(db.collection('financeiro_lancamentos').doc(), { ...commonData, accountId: data.sourceAccountId, type: 'Transferência', description: `Para ${destName}` });
@@ -36,8 +40,10 @@ export async function saveTransaction(form, isEdit = false) {
             updateAccountBalance(data.sourceAccountId, data.value, 'Saída', false, batch);
             updateAccountBalance(data.destinationAccountId, data.value, 'Entrada', false, batch);
         } else if (type === 'pagarFatura') {
+            shouldCheckForMonthAdvance = true;
+            monthYearToCheck = appState.currentMonthYear; // Usa o mês que o usuário está visualizando
             const paymentId = db.collection('financeiro_lancamentos').doc().id;
-            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(new Date(`${dateString}T12:00:00`)), monthYear: `${(new Date(dateString).getMonth() + 1).toString().padStart(2, '0')}-${new Date(dateString).getFullYear()}`, paymentId, invoiceMonthYear: data.invoiceMonthYear };
+            const commonData = { value: data.value, date: firebase.firestore.Timestamp.fromDate(transactionDate), monthYear: transactionMonthYear, paymentId, invoiceMonthYear: data.invoiceMonthYear };
             const sourceName = appState.accounts.find(a => a.id === data.sourceAccountId)?.name || 'N/A';
             const destName = appState.accounts.find(a => a.id === data.destinationAccountId)?.name || 'N/A';
             batch.set(db.collection('financeiro_lancamentos').doc(), { ...commonData, accountId: data.sourceAccountId, type: 'Pagamento de Fatura', description: `Pag. Fatura ${destName}`, destinationAccountId: data.destinationAccountId });
@@ -80,7 +86,7 @@ export async function saveTransaction(form, isEdit = false) {
             form.querySelector('[name="description"]')?.focus();
         }
         showToast('Lançamento salvo com sucesso!', 'success');
-        return { success: true, isEdit };
+        return { success: true, isEdit, shouldCheckForMonthAdvance, monthYear: monthYearToCheck };
     } catch (error) {
         console.error("Erro em saveTransaction:", error);
         showToast(error.message || 'Ocorreu um erro ao salvar.', 'error');

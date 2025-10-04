@@ -187,8 +187,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }, err => console.error(`Erro ao buscar ${col}:`, err));
                 });
                 this.state.listeners.push(...listeners);
-                // Assume os dados estáticos carregam rápido o suficiente para a primeira renderização.
-                // Uma abordagem mais robusta poderia usar um Promise.all em 'gets' iniciais.
                 res();
             });
 
@@ -198,16 +196,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!this.state.isLoading) {
                         this.renderCurrentView();
                     }
-                    res(); // Resolve na primeira vez que os dados chegam
+                    res();
                 }, err => { console.error("Erro ao buscar lançamentos:", err); res(); });
                 this.state.listeners.push(listener);
             });
             
             Promise.all([staticDataPromise, transactionDataPromise]).then(() => {
+                if (this.state.initialMonthDecided) return;
+                this.state.initialMonthDecided = true;
+
                 const now = new Date();
                 const currentRealMonthYear = `${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`;
                 const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 15);
-                const previousMonthYear = `${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}-${prevMonthDate.getFullYear()}`;
                 
                 let hasUnpaidInvoicesInPreviousMonth = false;
                 const creditCards = this.state.accounts.filter(a => a?.type === 'Cartão de Crédito' && !a.arquivado);
@@ -223,6 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                 }
                 
+                const previousMonthYear = `${(prevMonthDate.getMonth() + 1).toString().padStart(2, '0')}-${prevMonthDate.getFullYear()}`;
                 this.state.currentMonthYear = hasUnpaidInvoicesInPreviousMonth ? previousMonthYear : currentRealMonthYear;
 
                 this.state.isLoading = false;
@@ -474,7 +475,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const now = new Date();
             const currentRealMonthYear = `${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getFullYear()}`;
         
-            // Só avança se estivermos em um mês passado
             if (monthYear === currentRealMonthYear) {
                 return;
             }
@@ -500,8 +500,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         handleStateUpdateOnInput(e) {
             const input = e.target;
-            // Desativado o salvamento automático para o planejamento.
-            // Apenas atualiza o resumo visualmente se for um campo de valor.
             if (input.classList.contains('val')) {
                 UIRenderer.updatePlanningSummary();
             }
