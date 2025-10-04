@@ -236,11 +236,19 @@ export function getSettingsSubmenuHtml(submenu) {
                     <input type="range" id="font-size-slider" min="14" max="20" step="1" style="width: 100%; cursor: pointer;">
                 </div>
                 <div class="form-group">
-                    <label for="animation-style-selector">Estilo de Animação</label>
+                    <label for="animation-style-selector">Estilo de Animação (Geral)</label>
                     <select id="animation-style-selector">
                         <option value="sutil">Sutil (Padrão)</option>
                         <option value="fluida">Fluida</option>
                         <option value="instantanea">Instantânea (Sem Animações)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="pill-speed-selector">Velocidade das Animações (Abas)</label>
+                    <select id="pill-speed-selector">
+                        <option value="rapida">Rápida (0.2s)</option>
+                        <option value="normal">Normal (0.4s)</option>
+                        <option value="lenta">Lenta (0.6s)</option>
                     </select>
                 </div>
             </div>`,
@@ -328,22 +336,150 @@ export function getAccountsHtml() {
 
 export function getPlanningHtml() {
     return `
-    <div class="view-header"><h2><i class="fa-solid fa-lightbulb"></i> Planejamento Mensal</h2></div>
-    <div class="card" id="planning-card-container">
-    <div class="planning-section">
-    <div class="planning-section-header">
-    <h3><div class="section-icon"><i class="fa-solid fa-arrow-up"></i></div> Entradas Previstas</h3>
-    <button class="button-primary" data-action="add-planning-item" data-type="receitas"><i class="fa-solid fa-plus"></i> Adicionar</button>
+    <div class="planning-view-container">
+        <div class="view-header">
+            <h2><i class="fa-solid fa-lightbulb"></i> Planejamento Mensal</h2>
+        </div>
+
+        <div class="card">
+            <div class="planning-section-header">
+                <h3><div class="section-icon"><i class="fa-solid fa-arrow-up"></i></div> Entradas Previstas</h3>
+                <button class="button-primary" data-action="add-planning-item" data-type="receitas">
+                    <i class="fa-solid fa-plus"></i> Adicionar
+                </button>
+            </div>
+            <div class="list" id="receitasList"><div class="loading-spinner small"></div></div>
+        </div>
+
+        <div class="card">
+             <div class="planning-section-header">
+                <h3><div class="section-icon expenses-icon"><i class="fa-solid fa-arrow-down"></i></div> Saídas Previstas</h3>
+            </div>
+            <div class="planning-subsection-header">Faturas de Cartão</div>
+            <div class="list" id="faturasList"><div class="loading-spinner small"></div></div>
+            
+            <div class="planning-section-header" style="margin-top: 1.5rem;">
+                 <h3 style="font-size: 1rem; font-weight: 600; color: var(--text-secondary);">Outras Despesas</h3>
+                <button class="button-primary" data-action="add-planning-item" data-type="despesas">
+                    <i class="fa-solid fa-plus"></i> Adicionar
+                </button>
+            </div>
+            <div class="list" id="despesasList"><div class="loading-spinner small"></div></div>
+        </div>
+
+        <div class="summaryBox card-details">
+            <div id="planning-summary-content">
+                <div class="loading-spinner small"></div>
+            </div>
+        </div>
     </div>
-    <div class="planning-list" data-list-type="receitas"><div class="loading-spinner small"></div></div>
+    `;
+}
+
+export function renderPlanningLists() {
+    const { receitas = [], despesas = [] } = appState.planningData;
+    
+    const receitasContainer = document.getElementById('receitasList');
+    const faturasContainer = document.getElementById('faturasList');
+    const despesasContainer = document.getElementById('despesasList');
+
+    if (!receitasContainer || !faturasContainer || !despesasContainer) return;
+
+    receitasContainer.innerHTML = receitas.length > 0 ? receitas.map((item, index) => `
+        <div class="item">
+            <div class="item-main-line">
+                <div class="checkbox-paid">
+                    <input type="checkbox" class="paid" data-type="receitas" data-index="${index}" ${item.paid ? 'checked' : ''}>
+                </div>
+                <input type="text" class="desc" value="${item.description || ''}" placeholder="Descrição da receita">
+            </div>
+            <input type="number" class="val" step="0.01" value="${item.value || ''}" placeholder="0,00">
+            <div class="actions">
+                <button class="button-icon save-icon" data-action="save-planning-item" data-type="receitas" data-index="${index}" title="Salvar">
+                    <i class="fa-solid fa-save"></i>
+                </button>
+                <button class="button-icon delete-icon" data-action="delete-planning-item" data-type="receitas" data-index="${index}" title="Excluir">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        </div>
+    `).join('') : '<p class="empty-list-message">Nenhuma entrada prevista.</p>';
+
+    const faturas = despesas.filter(d => d.isAutomatic);
+    const outrasDespesas = despesas.filter(d => !d.isAutomatic);
+
+    faturasContainer.innerHTML = faturas.length > 0 ? faturas.map((item) => {
+        const originalIndex = despesas.indexOf(item);
+        const card = appState.accounts.find(a => a.id === item.cardId);
+        const cardIcon = card ? `<i class="fa-solid fa-credit-card" style="color: ${card.color}; margin-right: 8px;" title="${card.name}"></i>` : '';
+
+        return `
+        <div class="item">
+            <div class="item-main-line">
+                <div class="checkbox-paid">
+                    <input type="checkbox" class="paid" data-type="despesas" data-index="${originalIndex}" ${item.paid ? 'checked' : ''}>
+                </div>
+                <span class="desc" style="display: flex; align-items: center;">
+                    ${cardIcon}
+                    <input type="text" value="${item.description || ''}" readonly style="width: 100%; background: transparent; border: none; padding: 0;">
+                </span>
+            </div>
+            <input type="number" class="val" step="0.01" value="${item.value || ''}" placeholder="0,00" data-type="despesas" data-index="${originalIndex}">
+             <div class="actions">
+                <button class="button-icon sync-icon" data-action="sync-invoice" data-index="${originalIndex}" data-card-id="${item.cardId}" title="Sincronizar com fatura">
+                    <i class="fa-solid fa-sync"></i>
+                </button>
+                 <button class="button-icon save-icon" data-action="save-planning-item" data-type="despesas" data-index="${originalIndex}" title="Salvar valor">
+                    <i class="fa-solid fa-save"></i>
+                </button>
+            </div>
+        </div>`;
+    }).join('') : '<p class="empty-list-message">Nenhuma fatura automática para este mês.</p>';
+
+    despesasContainer.innerHTML = outrasDespesas.length > 0 ? outrasDespesas.map((item) => {
+         const originalIndex = despesas.indexOf(item);
+         return `
+        <div class="item">
+            <div class="item-main-line">
+                <div class="checkbox-paid">
+                    <input type="checkbox" class="paid" data-type="despesas" data-index="${originalIndex}" ${item.paid ? 'checked' : ''}>
+                </div>
+                <input type="text" class="desc" value="${item.description || ''}" placeholder="Descrição da despesa">
+            </div>
+            <input type="number" class="val" step="0.01" value="${item.value || ''}" placeholder="0,00">
+            <div class="actions">
+                <button class="button-icon save-icon" data-action="save-planning-item" data-type="despesas" data-index="${originalIndex}" title="Salvar">
+                    <i class="fa-solid fa-save"></i>
+                </button>
+                <button class="button-icon delete-icon" data-action="delete-planning-item" data-type="despesas" data-index="${originalIndex}" title="Excluir">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        </div>`;
+    }).join('') : '<p class="empty-list-message">Nenhuma outra despesa prevista.</p>';
+}
+
+export function updatePlanningSummary() {
+    const summaryContainer = document.getElementById('planning-summary-content');
+    if (!summaryContainer) return;
+
+    const { receitas = [], despesas = [] } = appState.planningData;
+    const totalReceitas = receitas.filter(r => r && !r.paid).reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+    const totalDespesas = despesas.filter(d => d && !d.paid).reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
+    const saldo = totalReceitas - totalDespesas;
+
+    summaryContainer.innerHTML = `
+    <div class="detail-row">
+        <span class="label"><i class="fa-solid fa-arrow-up summary-icon positive"></i><strong>Total de Entradas</strong></span>
+        <span class="value positive">${formatCurrency(totalReceitas)}</span>
     </div>
-    <div class="planning-section">
-    <div class="planning-section-header">
-    <h3><div class="section-icon expenses-icon"><i class="fa-solid fa-arrow-down"></i></div> Saídas Previstas</h3>
+    <div class="detail-row">
+        <span class="label"><i class="fa-solid fa-arrow-down summary-icon negative"></i><strong>Despesas a Pagar</strong></span>
+        <span class="value negative">${formatCurrency(totalDespesas)}</span>
     </div>
-    <div id="saidas-section-container"><div class="loading-spinner small"></div></div>
-    </div>
-    <div id="planning-summary" class="card-details"><div class="loading-spinner small"></div></div>
+    <div class="detail-row" style="font-size: 18px;">
+        <span class="label"><i class="fa-solid fa-wallet summary-icon neutral-positive"></i><strong>Saldo Previsto</strong></span>
+        <span class="value ${saldo >= 0 ? 'neutral-positive' : 'negative'}">${formatCurrency(saldo)}</span>
     </div>`;
 }
 
@@ -380,7 +516,7 @@ export function generateCardHTML(account) {
     const textColor = getContrastColor(account.color);
     let icon, mainLabel, mainValue, footerInfo = '';
 
-    const openInvoice = account.type === 'Cartão de Crédito' ? calculateInvoiceDetailsGlobal(account.id, true).openInvoiceTotal : 0;
+    const openInvoice = account.type === 'Cartão de Crédito' ? calculateInvoiceDetailsGlobal(account.id, new Date()).openInvoiceTotal : 0;
     const availableLimit = (account.limit || 0) - calculateCreditCardUsageGlobal(account.id);
 
     if (account.type === 'Conta Corrente') {
@@ -414,115 +550,6 @@ export function generateCardHTML(account) {
         ${footerInfo}
     </div>
     </div>`;
-}
-
-export function getPlanningRowHtml(type, item, index) {
-    if (!item) return '';
-
-    if (type === 'receitas') {
-        return `
-        <div class="planning-item income-item">
-        <div class="planning-input-description">
-        <input type="text" class="planning-input" value="${item.description || ''}" data-type="receitas" data-index="${index}" data-field="description" placeholder="Descrição da receita...">
-        </div>
-        <div class="planning-input-value input-group-currency">
-        <span class="currency-symbol">R$</span>
-        <input type="number" inputmode="decimal" class="planning-input" value="${item.value || ''}" placeholder="0,00" data-type="receitas" data-index="${index}" data-field="value">
-        </div>
-        <div class="planning-item-actions">
-        <button class="button-icon" data-action="delete-planning-item" data-type="receitas" data-index="${index}" title="Excluir"><i class="fa-solid fa-trash"></i></button>
-        </div>
-        </div>`;
-    }
-
-    if (item.isAutomatic) {
-        const card = appState.accounts.find(acc => acc && acc.id === item.cardId);
-        const cardColor = card ? card.color : '#cccccc';
-        return `
-        <div class="planning-item expense-item ${item.paid ? 'paid' : ''}">
-        <input type="checkbox" class="planning-item-checkbox" data-type="despesas" data-index="${index}" ${item.paid ? 'checked' : ''}>
-        <div class="planning-input-description-flex">
-        <span class="card-icon" style="background-color: ${cardColor};"><i class="fa-solid fa-credit-card"></i></span>
-        <input type="text" class="planning-input" value="${item.description}" readonly>
-        </div>
-        <button class="button-icon sync-btn" data-action="sync-invoice" data-card-id="${item.cardId}" data-index="${index}" title="Sincronizar com fatura"><i class="fa-solid fa-arrows-rotate"></i></button>
-        <div class="planning-input-value input-group-currency">
-        <span class="currency-symbol">R$</span>
-        <input type="number" inputmode="decimal" class="planning-input" value="${item.value || ''}" placeholder="0,00" data-type="despesas" data-index="${index}" data-field="value">
-        </div>
-        <div class="planning-item-actions"></div>
-        </div>`;
-    }
-
-    return `
-    <div class="planning-item expense-item ${item.paid ? 'paid' : ''}">
-    <input type="checkbox" class="planning-item-checkbox" data-type="despesas" data-index="${index}" ${item.paid ? 'checked' : ''}>
-    <div class="planning-input-description">
-    <input type="text" class="planning-input" value="${item.description || ''}" data-type="despesas" data-index="${index}" data-field="description" placeholder="Descrição da despesa...">
-    </div>
-    <div></div>
-    <div class="planning-input-value input-group-currency">
-    <span class="currency-symbol">R$</span>
-    <input type="number" inputmode="decimal" class="planning-input" value="${item.value || ''}" placeholder="0,00" data-type="despesas" data-index="${index}" data-field="value">
-    </div>
-    <div class="planning-item-actions">
-    <button class="button-icon" data-action="delete-planning-item" data-type="despesas" data-index="${index}" title="Excluir"><i class="fa-solid fa-trash"></i></button>
-    </div>
-    </div>`;
-}
-
-export function renderSaidasSection() {
-    const container = document.getElementById('saidas-section-container');
-    if (!container) return;
-    const allDespesas = appState.planningData.despesas || [];
-    const automaticFaturas = allDespesas.filter(d => d && d.isAutomatic);
-    const manualDespesas = allDespesas.filter(d => d && !d.isAutomatic);
-
-    const automaticHtml = automaticFaturas.map(item => getPlanningRowHtml('despesas', item, allDespesas.indexOf(item))).join('');
-    const manualHtml = manualDespesas.map(item => getPlanningRowHtml('despesas', item, allDespesas.indexOf(item))).join('');
-    container.innerHTML = `
-    <div class="planning-subsection-header">Faturas de Cartão</div>
-    <div class="planning-list" data-list-type="faturas">${automaticHtml.length ? automaticHtml : '<p style="font-size: 14px; color: var(--text-secondary); padding: 8px 12px;">Nenhuma fatura prevista.</p>'}</div>
-    <div class="planning-subsection-header">Outras Despesas</div>
-    <div class="planning-list" data-list-type="outrasDespesas">${manualHtml.length ? manualHtml : '<p style="font-size: 14px; color: var(--text-secondary); padding: 8px 12px;">Nenhuma outra despesa prevista.</p>'}</div>
-    <button class="button-primary" data-action="add-planning-item" data-type="despesas" style="margin-top: 16px;"><i class="fa-solid fa-plus"></i> Adicionar Outra Despesa</button>`;
-}
-
-export function renderList(listType) {
-    const listContainer = document.querySelector(`.planning-list[data-list-type="${listType}"]`);
-    if (!listContainer) return;
-    const items = (appState.planningData[listType] || []).filter(i => !!i);
-    listContainer.innerHTML = items.length
-        ? items.map(item => getPlanningRowHtml(listType, item, appState.planningData[listType].indexOf(item))).join('')
-        : '<p style="font-size: 14px; color: var(--text-secondary); padding: 8px 12px;">Nenhuma entrada prevista.</p>';
-}
-
-export function updateSummary() {
-    const summaryContainer = document.getElementById('planning-summary');
-    if (!summaryContainer) return;
-    const despesasAPagar = (appState.planningData.despesas || []).filter(item => item && !item.paid);
-    const totalDespesas = despesasAPagar.reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
-    const totalReceitas = (appState.planningData.receitas || []).filter(i => !!i).reduce((sum, item) => sum + (parseFloat(item.value) || 0), 0);
-    const saldo = totalReceitas - totalDespesas;
-    summaryContainer.innerHTML = `
-    <div class="detail-row">
-    <span class="label"><i class="fa-solid fa-arrow-up summary-icon positive"></i><strong>Total de Entradas</strong></span>
-    <span class="value positive">${formatCurrency(totalReceitas)}</span>
-    </div>
-    <div class="detail-row">
-    <span class="label"><i class="fa-solid fa-arrow-down summary-icon negative"></i><strong>Total de Saídas (A Pagar)</strong></span>
-    <span class="value negative">${formatCurrency(totalDespesas)}</span>
-    </div>
-    <div class="detail-row" style="font-size: 18px;">
-    <span class="label"><i class="fa-solid fa-wallet summary-icon neutral-positive"></i><strong>Saldo Previsto</strong></span>
-    <span class="value ${saldo >= 0 ? 'neutral-positive' : 'negative'}">${formatCurrency(saldo)}</span>
-    </div>`;
-}
-
-export function renderAllPlanningSections() {
-    renderList('receitas');
-    renderSaidasSection();
-    updateSummary();
 }
 
 export function renderLancamentoForm(type, prefillData = {}) {
@@ -941,7 +968,7 @@ export function showOcrRuleModal(ruleId = null) {
     };
 
     typeSelector.addEventListener('change', toggleAssociationFields);
-    toggleAssociationFields(); // Executa na abertura para o caso de edição
+    toggleAssociationFields(); 
 
     const generateBtn = modalContainer.querySelector('#ocr-wizard-generate-btn');
     if (generateBtn) {
@@ -973,7 +1000,7 @@ export function showOcrRuleModal(ruleId = null) {
                 case 'description':
                 case 'establishmentId':
                 case 'accountId':
-                    replacement = `(${escapeRegex(targetValue)})`; // Captura o valor exato
+                    replacement = `(${escapeRegex(targetValue)})`; 
                     break;
                 case 'date':
                     replacement = '(\\d{2}).*?(\\w{3}).*?(\\d{4})';

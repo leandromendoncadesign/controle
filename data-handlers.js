@@ -126,9 +126,6 @@ export async function saveItem(e, collection, itemName) {
         } else if (itemName === 'Regra OCR') {
             data.enabled = 'enabled' in data;
             data.priority = parseInt(data.priority) || 10;
-            if (data.associatedId === '') {
-                delete data.associatedId;
-            }
         }
 
         if (id) {

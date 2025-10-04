@@ -17,7 +17,6 @@ let renderLancamentoFormGlobal;
 let calculateInvoiceDetailsGlobal;
 let updateSummaryGlobal;
 let findItemNameGlobal;
-let planningSaveTimeout = null;
 
 export function initLogicManager(state, firestore, planningSaver, renderView, renderForm, invoiceDetailsFunc, summaryUpdateFunc, findNameFunc) {
     appState = state;
@@ -36,7 +35,6 @@ export function testSingleOcrRule(text, rule) {
     }
 
     try {
-        // 'i' para case-insensitive, 'm' para multiline
         const match = text.match(new RegExp(rule.pattern, 'im'));
 
         if (match) {
@@ -52,7 +50,7 @@ export function testSingleOcrRule(text, rule) {
                     if (match[1]) extractedValue = rule.name.toLowerCase().includes('vista') ? 1 : parseInt(match[1], 10);
                     break;
                 case 'date':
-                    if (match.length > 3) { // Espera grupos de captura para dia, mês, ano
+                    if (match.length > 3) {
                         const day = match[1];
                         const monthStr = match[2];
                         const year = match[3];
@@ -71,7 +69,6 @@ export function testSingleOcrRule(text, rule) {
                      break;
             }
 
-            // Verifica se um valor foi extraído e é válido
             if (extractedValue !== null && (!isNaN(extractedValue) || (typeof extractedValue === 'string' && extractedValue))) {
                 return { success: true, value: extractedValue };
             }
@@ -80,13 +77,6 @@ export function testSingleOcrRule(text, rule) {
     } catch (e) {
         return { success: false, message: `Erro no padrão Regex: ${e.message}` };
     }
-}
-
-export function debouncedSavePlanning() {
-    clearTimeout(planningSaveTimeout);
-    planningSaveTimeout = setTimeout(() => {
-        savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
-    }, 1500);
 }
 
 export async function syncAutomaticInvoices() {
@@ -99,18 +89,20 @@ export async function syncAutomaticInvoices() {
     despesas = despesas.filter(d => !d.isAutomatic || creditCards.some(c => c.id === d.cardId));
 
     for (const card of creditCards) {
-        const invoiceDetails = calculateInvoiceDetailsGlobal(card.id, false);
+        const refDate = new Date(appState.currentMonthYear.split('-')[1], appState.currentMonthYear.split('-')[0] - 1, 15);
+        const invoiceDetails = calculateInvoiceDetailsGlobal(card.id, refDate);
+        const formattedValue = parseFloat(invoiceDetails.openInvoiceTotal.toFixed(2));
         const existingInvoiceIndex = despesas.findIndex(d => d.cardId === card.id && d.isAutomatic);
 
         if (existingInvoiceIndex > -1) {
-            if (despesas[existingInvoiceIndex].value !== invoiceDetails.openInvoiceTotal) {
-                despesas[existingInvoiceIndex].value = invoiceDetails.openInvoiceTotal;
+            if (despesas[existingInvoiceIndex].value !== formattedValue) {
+                despesas[existingInvoiceIndex].value = formattedValue;
                 hasChanged = true;
             }
-        } else if (invoiceDetails.openInvoiceTotal > 0) {
+        } else if (formattedValue > 0) {
             despesas.push({
                 description: `Fatura ${card.name}`,
-                value: invoiceDetails.openInvoiceTotal,
+                value: formattedValue,
                 paid: false, isAutomatic: true, cardId: card.id
             });
             hasChanged = true;
@@ -124,48 +116,60 @@ export async function syncAutomaticInvoices() {
 }
 
 export async function syncInvoiceValue(index, cardId) {
-    const invoiceTotal = calculateInvoiceDetailsGlobal(cardId, false).openInvoiceTotal;
     const item = appState.planningData.despesas[parseInt(index)];
-    if(item) {
-        item.value = invoiceTotal;
-        const inputField = document.querySelector(`.planning-input[data-index="${index}"][data-field="value"]`);
-        if (inputField) inputField.value = invoiceTotal.toFixed(2);
-        updateSummaryGlobal();
-        showToast(`Fatura ${findItemNameGlobal(cardId, 'accounts')} sincronizada!`, 'success');
-        await savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
-    }
+    if (!item) return;
+
+    const refDate = new Date(appState.currentMonthYear.split('-')[1], appState.currentMonthYear.split('-')[0] - 1, 15);
+    const invoiceTotal = calculateInvoiceDetailsGlobal(cardId, refDate).openInvoiceTotal;
+    item.value = parseFloat(invoiceTotal.toFixed(2));
+    
+    await savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
+    showToast(`Fatura ${findItemNameGlobal(cardId, 'accounts')} sincronizada!`, 'success');
+    renderCurrentViewGlobal();
 }
 
 export function addPlanningItem(type) {
     if (!appState.planningData[type]) appState.planningData[type] = [];
-    const newItem = type === 'despesas' ? { description: '', value: 0, paid: false } : { description: '', value: 0 };
+    
+    const newItem = type === 'despesas' 
+        ? { description: '', value: 0, paid: false, isAutomatic: false } 
+        : { description: '', value: 0, paid: false };
+        
     appState.planningData[type].push(newItem);
-    savePlanningDataGlobal(appState.planningData, appState.currentMonthYear); 
     renderCurrentViewGlobal();
 }
 
-export function deletePlanningItem(type, index) {
+export async function savePlanningItem(type, index) {
+    const itemEl = document.querySelector(`.item:has([data-type="${type}"][data-index="${index}"])`);
+    if (!itemEl || !appState.planningData[type] || !appState.planningData[type][index]) {
+        showToast('Erro: Item não encontrado para salvar.', 'error');
+        return;
+    }
+
+    const descInput = itemEl.querySelector('.desc');
+    const valueInput = itemEl.querySelector('.val');
+    
+    const description = descInput ? descInput.value : appState.planningData[type][index].description;
+    const value = valueInput ? parseFloat(valueInput.value) || 0 : appState.planningData[type][index].value;
+
+    appState.planningData[type][index].description = description;
+    appState.planningData[type][index].value = value;
+
+    await savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
+    showToast('Item salvo!', 'success');
+    updateSummaryGlobal();
+}
+
+export async function deletePlanningItem(type, index) {
     if (appState.planningData[type]?.[index]) {
         appState.planningData[type].splice(index, 1);
-        savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
+        await savePlanningDataGlobal(appState.planningData, appState.currentMonthYear);
         renderCurrentViewGlobal();
     }
 }
 
 export function attachPlanningKeydownListener(viewContainer, elementRefs) {
-    const listener = (e) => {
-        if (e.key !== 'Enter' || !e.target.classList.contains('planning-input')) return;
-        e.preventDefault();
-        const input = e.target;
-        const { type } = input.dataset;
-        if (input.closest('.planning-input-description')) {
-            input.closest('.planning-item').querySelector('.planning-input-value input')?.focus();
-        } else if (input.closest('.planning-input-value')) {
-            addPlanningItem(type);
-        }
-    };
-    elementRefs.planningKeydownListener = listener;
-    viewContainer.addEventListener('keydown', listener);
+    return;
 }
 
 export function calculateCreditCardUsage(cardId) {
@@ -179,15 +183,13 @@ export function isInvoicePaid(cardId, invoiceMonthYear) {
     return appState.allTransactions.some(t => t?.type === 'Pagamento de Fatura' && t.destinationAccountId === cardId && t.invoiceMonthYear === invoiceMonthYear);
 }
 
-export function calculateInvoiceDetails(cardId, useCurrentDate = false) {
+export function calculateInvoiceDetails(cardId, referenceDate = null) {
     const card = appState.accounts.find(a => a?.id === cardId);
     if (!card?.closingDay) return { openInvoiceTotal: 0, invoiceKey: '' };
     
-    const referenceDate = useCurrentDate 
-        ? new Date() 
-        : getDateObject(new Date(appState.currentMonthYear.split('-')[1], appState.currentMonthYear.split('-')[0] - 1, 15));
+    const date = referenceDate ? getDateObject(referenceDate) : new Date();
 
-    const invoiceKey = getInvoiceKeyForDate(referenceDate, card);
+    const invoiceKey = getInvoiceKeyForDate(date, card);
     const transactions = appState.allTransactions.filter(t => {
         if (t?.accountId !== cardId || t.type !== 'Saída') return false;
         const transactionInvoiceKey = getInvoiceKeyForDate(getDateObject(t.date), card);
@@ -208,22 +210,38 @@ export function postRenderInvoices(getTransactionHtmlFunc) {
         const cardId = cardSelector.value;
         const card = appState.accounts.find(a => a.id === cardId);
         if (!card) return;
+
+        // CORREÇÃO APLICADA AQUI: Usa o mês atual do app como referência, não a data de hoje.
+        const [month, year] = appState.currentMonthYear.split('-');
+        const referenceDateForView = new Date(year, month - 1, 15);
+        const defaultInvoiceKey = getInvoiceKeyForDate(referenceDateForView, card);
         
-        const openInvoiceKey = calculateInvoiceDetails(cardId, true).invoiceKey;
+        const previouslySelectedPeriod = periodSelector.value;
+
         const transByInvoice = appState.allTransactions.filter(t => t?.accountId === cardId && t.type === 'Saída').reduce((acc, t) => {
             const key = getInvoiceKeyForDate(getDateObject(t.date), card);
             if (!acc[key]) acc[key] = [];
             acc[key].push(t);
             return acc;
         }, {});
-            
-        if (openInvoiceKey && !transByInvoice[openInvoiceKey]) transByInvoice[openInvoiceKey] = [];
+        
+        // Garante que a fatura do mês de visualização e a fatura em aberto (se diferentes) existam na lista
+        if (!transByInvoice[defaultInvoiceKey]) {
+            transByInvoice[defaultInvoiceKey] = [];
+        }
+        const currentOpenInvoiceKey = calculateInvoiceDetailsGlobal(cardId, new Date()).invoiceKey;
+        if (currentOpenInvoiceKey && !transByInvoice[currentOpenInvoiceKey]) {
+            transByInvoice[currentOpenInvoiceKey] = [];
+        }
+
         const sortedPeriods = Object.keys(transByInvoice).sort((a, b) => new Date(b.split('-')[1], b.split('-')[0]-1) - new Date(a.split('-')[1], a.split('-')[0]-1));
         
         periodSelector.innerHTML = sortedPeriods.map(p => `<option value="${p}">${capitalizeFirstLetter(new Date(p.split('-')[1], p.split('-')[0]-1, 1).toLocaleString('pt-BR', { month: 'long' }))} de ${p.split('-')[1]}</option>`).join('');
         
-        if (!periodSelector.value) {
-            periodSelector.value = openInvoiceKey;
+        if (previouslySelectedPeriod && periodSelector.querySelector(`option[value="${previouslySelectedPeriod}"]`)) {
+            periodSelector.value = previouslySelectedPeriod;
+        } else {
+            periodSelector.value = defaultInvoiceKey;
         }
         
         const periodKey = periodSelector.value;
@@ -235,10 +253,10 @@ export function postRenderInvoices(getTransactionHtmlFunc) {
         const periodTrans = (transByInvoice[periodKey] || []).sort((a,b) => getDateObject(b.date) - getDateObject(a.date));
         const total = periodTrans.reduce((s, t) => s + t.value, 0);
         const paid = isInvoicePaid(cardId, periodKey);
-        const [month, year] = periodKey.split('-');
+        const [invoiceMonth, invoiceYear] = periodKey.split('-');
         
-        const dueDate = new Date(year, parseInt(month, 10) - 1, card.dueDate);
-        const closingDate = new Date(year, parseInt(month, 10) - 1, card.closingDay);
+        const dueDate = new Date(invoiceYear, parseInt(invoiceMonth, 10) - 1, card.dueDate);
+        const closingDate = new Date(invoiceYear, parseInt(invoiceMonth, 10) - 1, card.closingDay);
         if (card.dueDate && card.closingDay && closingDate > dueDate) {
             dueDate.setMonth(dueDate.getMonth() + 1);
         }
@@ -287,10 +305,8 @@ export function launchOcr(renderFormFunc) {
         try {
             const { data: { text } } = await Tesseract.recognize(file, 'por');
 
-            // Etapa 1: Obter dados de regras específicas (valor, data, associações diretas, etc.)
             let data = parseReceiptText(text);
 
-            // Etapa 2: Se nenhuma regra de associação direta encontrou o estabelecimento, fazer a "varredura global".
             if (!data.establishmentId) {
                 const establishmentIdFromScan = findEstablishmentByGlobalScan(text, appState.establishments);
                 if (establishmentIdFromScan) {
@@ -298,11 +314,8 @@ export function launchOcr(renderFormFunc) {
                 }
             }
 
-            // Etapa 3: Renderizar o formulário com todos os dados encontrados.
             renderFormFunc('saida', data);
 
-            // Etapa 4: Após o formulário renderizar, se um estabelecimento foi encontrado (por qualquer método),
-            // acionar a busca pela categoria padrão.
             setTimeout(() => {
                 const form = document.getElementById('lancar-form');
                 if (form && data.establishmentId) {
@@ -328,7 +341,7 @@ export function launchOcr(renderFormFunc) {
 export function parseReceiptText(text) {
     const data = {};
     const rules = (appState.ocrRules || [])
-        .filter(r => r && r.enabled && r.pattern) // Garante que a regra é válida
+        .filter(r => r && r.enabled && r.pattern) 
         .sort((a, b) => (a.priority || 99) - (b.priority || 99));
 
     for (const rule of rules) {
@@ -508,11 +521,22 @@ export function generateReport(showReportModalFunc) {
     showReportModalFunc(appState.currentReport);
 }
 
+function updatePillAnimationSpeed(speed) {
+    let speedValue = '0.4s'; // Normal
+    if (speed === 'rapida') speedValue = '0.2s';
+    if (speed === 'lenta') speedValue = '0.6s';
+    document.documentElement.style.setProperty('--pill-animation-speed', speedValue);
+}
+
 export function applySavedSettings() {
     const fontSize = localStorage.getItem('appFontSize');
     if (fontSize) document.documentElement.style.setProperty('--base-font-size', `${fontSize}px`);
+    
     const animationStyle = localStorage.getItem('appAnimationStyle');
     if (animationStyle) updateAnimationSpeed(animationStyle);
+
+    const pillSpeed = localStorage.getItem('appPillSpeed');
+    if (pillSpeed) updatePillAnimationSpeed(pillSpeed);
 }
 
 export function updateAnimationSpeed(style) {
@@ -525,18 +549,29 @@ export function updateAnimationSpeed(style) {
 export function setupAppearanceSettings() {
     const fontSizeSlider = document.getElementById('font-size-slider');
     const animationSelector = document.getElementById('animation-style-selector');
-    if (!fontSizeSlider || !animationSelector) return;
-    
-    fontSizeSlider.value = localStorage.getItem('appFontSize') || '16';
-    animationSelector.value = localStorage.getItem('appAnimationStyle') || 'sutil';
-    
-    fontSizeSlider.oninput = (e) => {
-        document.documentElement.style.setProperty('--base-font-size', `${e.target.value}px`);
-        localStorage.setItem('appFontSize', e.target.value);
-    };
-    animationSelector.onchange = (e) => {
-        updateAnimationSpeed(e.target.value);
-        localStorage.setItem('appAnimationStyle', e.target.value);
-    };
+    const pillSpeedSelector = document.getElementById('pill-speed-selector');
 
+    if (fontSizeSlider) {
+        fontSizeSlider.value = localStorage.getItem('appFontSize') || '16';
+        fontSizeSlider.oninput = (e) => {
+            document.documentElement.style.setProperty('--base-font-size', `${e.target.value}px`);
+            localStorage.setItem('appFontSize', e.target.value);
+        };
+    }
+    
+    if (animationSelector) {
+        animationSelector.value = localStorage.getItem('appAnimationStyle') || 'sutil';
+        animationSelector.onchange = (e) => {
+            updateAnimationSpeed(e.target.value);
+            localStorage.setItem('appAnimationStyle', e.target.value);
+        };
+    }
+
+    if (pillSpeedSelector) {
+        pillSpeedSelector.value = localStorage.getItem('appPillSpeed') || 'normal';
+        pillSpeedSelector.onchange = (e) => {
+            updatePillAnimationSpeed(e.target.value);
+            localStorage.setItem('appPillSpeed', e.target.value);
+        };
+    }
 }
